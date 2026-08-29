@@ -71,6 +71,7 @@ class WorkflowState(BaseModel):
     plan: PlannerOutput | None = None
     sessions: list[SessionDraft] = Field(default_factory=list)
     schedule_warnings: list[str] = Field(default_factory=list)
+    calendar_synced: bool = False
     summary: str = ""
 
 

@@ -24,6 +24,10 @@ class Settings:
         default_factory=lambda: os.environ.get("GEMINI_MODEL_EXTRACT", "gemini-3.5-flash")
     )
     upload_bucket: str = field(default_factory=lambda: os.environ.get("GCS_UPLOAD_BUCKET", ""))
+    calendar_enabled: bool = field(
+        default_factory=lambda: os.environ.get("CALENDAR_ENABLED", "").lower() == "true"
+    )
+    schedule_tz: str = field(default_factory=lambda: os.environ.get("SCHEDULE_TZ", "Asia/Tokyo"))
     weakness_threshold: float = 0.6
 
 

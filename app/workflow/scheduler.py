@@ -153,3 +153,31 @@ def placeholder_free_slots(
         (day.replace(hour=hour_from), day.replace(hour=hour_to))
         for day in (base + timedelta(days=i) for i in range(days))
     ]
+
+
+def compute_free_slots(
+    start: datetime,
+    busy: list[TimeSlot],
+    days: int = 14,
+    hour_from: int = 20,
+    hour_to: int = 22,
+) -> list[TimeSlot]:
+    """毎日の学習可能ウィンドウから busy 区間を差し引いた空きスロットを返す (純粋関数)。
+
+    Calendar FreeBusy の結果 (busy) と組み合わせて実際の空き時間を作る。
+    設計書 §4.2 配置アルゴリズム step 1-2 に相当。
+    """
+    free: list[TimeSlot] = []
+    for window_start, window_end in placeholder_free_slots(start, days, hour_from, hour_to):
+        cursor = window_start
+        for b_start, b_end in sorted(busy):
+            if b_end <= cursor or b_start >= window_end:
+                continue
+            if b_start > cursor:
+                free.append((cursor, min(b_start, window_end)))
+            cursor = max(cursor, b_end)
+            if cursor >= window_end:
+                break
+        if cursor < window_end:
+            free.append((cursor, window_end))
+    return free

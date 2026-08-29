@@ -15,5 +15,9 @@ infra/**/.terraform/
 !*.tfvars.example
 .terraform.lock.hcl
 
+# OAuth secrets (絶対にコミットしない)
+client_secret*.json
+calendar-token.json
+
 # Local data
 neo4j-data/

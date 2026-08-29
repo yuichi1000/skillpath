@@ -97,3 +97,33 @@ def test_respects_max_block_config():
         plan_key="a1",
     )
     assert [int((s.end - s.start).total_seconds() // 60) for s in sessions] == [60, 60]
+
+
+def test_compute_free_slots_subtracts_busy():
+    from app.workflow.scheduler import compute_free_slots
+
+    start = datetime(2026, 9, 1)
+    # 9/2 の 20:30-21:00 に既存予定 → 窓 20-22 が 2 分割される
+    busy = [(datetime(2026, 9, 2, 20, 30), datetime(2026, 9, 2, 21, 0))]
+    slots = compute_free_slots(start, busy, days=1)
+    assert slots == [
+        (datetime(2026, 9, 2, 20, 0), datetime(2026, 9, 2, 20, 30)),
+        (datetime(2026, 9, 2, 21, 0), datetime(2026, 9, 2, 22, 0)),
+    ]
+
+
+def test_compute_free_slots_busy_covers_whole_window():
+    from app.workflow.scheduler import compute_free_slots
+
+    start = datetime(2026, 9, 1)
+    busy = [(datetime(2026, 9, 2, 19, 0), datetime(2026, 9, 2, 23, 0))]
+    slots = compute_free_slots(start, busy, days=2)
+    # 9/2 は丸ごと潰れ、9/3 だけ残る
+    assert slots == [(datetime(2026, 9, 3, 20, 0), datetime(2026, 9, 3, 22, 0))]
+
+
+def test_compute_free_slots_no_busy_equals_placeholder():
+    from app.workflow.scheduler import compute_free_slots, placeholder_free_slots
+
+    start = datetime(2026, 9, 1)
+    assert compute_free_slots(start, [], days=3) == placeholder_free_slots(start, days=3)

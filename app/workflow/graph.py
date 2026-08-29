@@ -21,12 +21,14 @@ ADK の約束事:
   state に保存し、dispatch が原文を出力として後段 LLM へ渡す
 """
 
+import logging
 from datetime import datetime
 
 from google.adk.events import Event
 from google.adk.workflow import START, Workflow, node
 from pydantic import BaseModel, Field
 
+from app.config import get_settings
 from app.models.schemas import (
     FeedbackOutput,
     IngestionOutput,
@@ -39,8 +41,15 @@ from app.workflow.feedback import build_feedback_extractor, store_feedback
 from app.workflow.ingestion import build_ingestion_extractor, store_ingestion
 from app.workflow.planner import build_plan
 from app.workflow.router import build_router
-from app.workflow.scheduler import SessionDraft, allocate_sessions, placeholder_free_slots
+from app.workflow.scheduler import (
+    SessionDraft,
+    allocate_sessions,
+    compute_free_slots,
+    placeholder_free_slots,
+)
 from app.workflow.weakness import DEFAULT_THRESHOLD, detect_weakness
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowState(BaseModel):
@@ -131,18 +140,71 @@ def scheduler_node(
     ctx, uid: str, plan: PlannerOutput, plan_kind: str,
     schedule_start: str = "", deadline: str = "",
 ):
+    from datetime import timedelta
+
+    from app.tools import calendar_tool
+    from app.tools.neo4j_tool import run_named
+    from app.workflow import notifier as nmod
+
     start = datetime.fromisoformat(schedule_start) if schedule_start else datetime.now()
-    # TODO(calendar): Calendar 接続後は placeholder を calendar_tool.get_freebusy に差し替え、
-    # 作成した SessionDraft を upsert_event + scheduler.cypher (LearningSession) に流す
-    slots = placeholder_free_slots(start)
+    settings = get_settings()
+    calendar_ok = False
+    warnings_extra: list[str] = []
+    if settings.calendar_enabled:
+        # 実カレンダーの busy を差し引いた空き時間 (設計書 §4.2 step 1-2)
+        try:
+            busy = calendar_tool.get_busy(start, start + timedelta(days=15))
+            slots = compute_free_slots(start, busy)
+            calendar_ok = True
+        except calendar_tool.CalendarUnavailable as e:
+            logger.warning("Calendar 未接続のためプレースホルダで続行: %s", e)
+            warnings_extra.append("カレンダー未接続のため仮の空き時間で計画しています")
+            slots = placeholder_free_slots(start)
+    else:
+        slots = placeholder_free_slots(start)
+
     plan_key = ctx.state.get("assessment_id") or f"{uid}-{plan_kind}"
     sessions, warnings = allocate_sessions(
         plan, slots, plan_key=plan_key, kind=plan_kind,
         deadline=datetime.fromisoformat(deadline) if deadline else None,
     )
+
+    if calendar_ok and sessions:
+        # イベント作成 → LearningSession を Neo4j に記録 (設計書 §4.2 step 6 / §5 冪等)
+        names = {item.skill_id: item.name or item.skill_id for item in plan.plan}
+        weakness = ctx.state.get("weakness")
+        weakness_model = WeaknessOutput.model_validate(weakness) if weakness else None
+        session_rows = []
+        for s in sessions:
+            summary, description = nmod.build_event_texts(
+                s.skill_id, names, plan_kind, weakness_model
+            )
+            event_id = calendar_tool.upsert_event(
+                s.session_id, summary, description, s.start, s.end
+            )
+            session_rows.append(
+                {
+                    "id": s.session_id,
+                    "skill_id": s.skill_id,
+                    "start": s.start.isoformat(),
+                    "duration_min": int((s.end - s.start).total_seconds() // 60),
+                    "event_id": event_id,
+                    "kind": s.kind,
+                    "resource_id": None,
+                    "from_page": None,
+                    "to_page": None,
+                }
+            )
+        run_named("scheduler.cypher", "create_sessions", uid=uid, sessions=session_rows)
+        ctx.state["calendar_synced"] = True
+
     ctx.state["sessions"] = [s.model_dump(mode="json") for s in sessions]
-    ctx.state["schedule_warnings"] = warnings
-    return {"created_blocks": len(sessions), "warnings": warnings}
+    ctx.state["schedule_warnings"] = warnings + warnings_extra
+    return {
+        "created_blocks": len(sessions),
+        "calendar_synced": calendar_ok,
+        "warnings": warnings + warnings_extra,
+    }
 
 
 @node(name="notifier")

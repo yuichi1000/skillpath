@@ -72,6 +72,10 @@ resource "google_cloud_run_v2_service" "workflow" {
         name  = "GCS_UPLOAD_BUCKET"
         value = var.upload_bucket_name
       }
+      env {
+        name  = "CALENDAR_ENABLED"
+        value = "true" # トークン未登録の間は自動でプレースホルダにフォールバックする
+      }
     }
   }
 

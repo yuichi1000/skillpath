@@ -16,6 +16,7 @@ dependencies = [
     "google-cloud-pubsub>=2.23",
     "google-api-python-client>=2.140",
     "google-auth>=2.34",
+    "google-auth-oauthlib>=1.2",
     "opentelemetry-sdk>=1.27",
     "opentelemetry-exporter-gcp-trace>=1.7",
 ]

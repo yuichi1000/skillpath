@@ -6,7 +6,9 @@ from google.genai import types
 from app.workflow.graph import build_workflow
 
 
-async def run_workflow(initial_state: dict, *, with_router: bool = False, message: str = "模試結果を分析して") -> dict:
+async def run_workflow(
+    initial_state: dict, *, with_router: bool = False, message: str = "模試結果を分析して"
+) -> dict:
     """ワークフローを1回実行し、実行後のセッション状態を返す。"""
     runner = InMemoryRunner(node=build_workflow(with_router=with_router))
     uid = initial_state["uid"]

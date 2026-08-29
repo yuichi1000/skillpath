@@ -10,7 +10,7 @@ from app.tools import neo4j_tool
 from app.tools.init_schema import init_schema
 
 CLEANUP = """
-MATCH (n) WHERE coalesce(n.id, n.uid, '') STARTS WITH 'test-w-'
+MATCH (n) WHERE coalesce(n.id, n.uid, '') CONTAINS 'test-w'
 DETACH DELETE n
 """
 

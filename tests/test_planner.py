@@ -1,7 +1,9 @@
 from app.workflow.planner import SkillNode, build_plan, estimate_minutes, topological_sort
 
 
-def node(skill_id: str, deps: list[tuple[str, float]] = (), hours: float = 1.0, mastery: float = 0.0):
+def node(
+    skill_id: str, deps: list[tuple[str, float]] = (), hours: float = 1.0, mastery: float = 0.0
+):
     return SkillNode(
         skill_id=skill_id,
         name=skill_id,

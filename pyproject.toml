@@ -38,6 +38,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["llm: 実際の Gemini API を呼ぶテスト (make test では除外)"]
 
 [build-system]
 requires = ["hatchling"]

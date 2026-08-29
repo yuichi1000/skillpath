@@ -27,7 +27,8 @@ def build_summary(
     lines.append("")
     lines.append(f"学習順序 ({len(plan.plan)} 件):")
     for item in plan.plan:
-        lines.append(f"  {item.order}. {names.get(item.skill_id, item.skill_id)} ({item.estimated_minutes}分)")
+        name = names.get(item.skill_id, item.skill_id)
+        lines.append(f"  {item.order}. {name} ({item.estimated_minutes}分)")
     for w in plan.warnings:
         lines.append(f"⚠ {w}")
 

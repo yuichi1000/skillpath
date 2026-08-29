@@ -36,7 +36,7 @@ def test_spans_multiple_slots_and_keeps_order():
         plan_of(("nn", 180), ("dl", 120)), slots, plan_key="a1"
     )
     assert [s.skill_id for s in sessions] == ["nn", "nn", "dl", "dl"]
-    assert all(a.end <= b.start for a, b in zip(sessions, sessions[1:]))
+    assert all(a.end <= b.start for a, b in zip(sessions, sessions[1:], strict=False))
     assert warnings == []
 
 

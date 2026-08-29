@@ -10,27 +10,27 @@ import pytest
 
 from tests.test_graph import run_workflow
 
+# @needs_api_key を付けたテストは実 API を呼ぶ (make test では除外、make test-all で実行)
 needs_api_key = pytest.mark.skipif(
     not os.getenv("GOOGLE_API_KEY"), reason="GOOGLE_API_KEY 未設定 (LLM テストはスキップ)"
 )
 
 
+@pytest.mark.llm
 @needs_api_key
-async def test_assessment_intent_reaches_weakness_branch(weakness_graph):
+async def test_assessment_intent_is_classified(weakness_graph):
+    # 意図分類のみを検証する。スコア付きテキストでの一気通貫は
+    # test_feedback.test_full_flow_from_pasted_text が担う
     state = await run_workflow(
-        {
-            "uid": "test-w-user",
-            "assessment_id": "test-w-assess1",
-            "schedule_start": "2026-09-01T00:00:00",
-        },
+        {"uid": "test-w-user"},
         with_router=True,
         message="模試を受けたので結果を分析してください",
     )
     assert state["router_output"]["intent"] == "assessment"
-    assert state["weakness"]["has_weakness"] is True
-    assert "📅 学習スケジュール" in state["summary"]
+    assert state["user_input"].startswith("模試を受けた")
 
 
+@pytest.mark.llm
 @needs_api_key
 async def test_register_intent_goes_to_stub(weakness_graph):
     state = await run_workflow(

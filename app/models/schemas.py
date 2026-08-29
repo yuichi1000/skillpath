@@ -68,8 +68,8 @@ class PerSkillScore(BaseModel):
 
 
 class FeedbackOutput(BaseModel):
-    assessment_id: str
-    taken_at: str
+    assessment_id: str = ""  # LLM には決めさせない。feedback_store が uid+taken_at から決定的に生成
+    taken_at: str = ""
     source: str = ""
     total_score: float
     per_skill: list[PerSkillScore]

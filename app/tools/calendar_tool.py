@@ -10,7 +10,9 @@ from datetime import datetime
 SESSION_ID_PROP = "skillpath_session_id"
 
 
-def get_freebusy(uid: str, time_min: datetime, time_max: datetime) -> list[tuple[datetime, datetime]]:
+def get_freebusy(
+    uid: str, time_min: datetime, time_max: datetime
+) -> list[tuple[datetime, datetime]]:
     """FreeBusy API で空き時間帯を返す。OAuth トークンは Secret Manager/Firestore から取得。"""
     raise NotImplementedError("TODO: Calendar FreeBusy API")
 

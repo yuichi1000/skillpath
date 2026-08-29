@@ -47,5 +47,6 @@ def run_query(query: str, **params) -> list[dict]:
         return [r.data() for r in session.run(query, **params)]
 
 
-def run_named(filename: str, name: str, **params) -> list[dict]:
-    return run_query(load_queries(filename)[name], **params)
+def run_named(filename: str, query_name: str, /, **params) -> list[dict]:
+    # 位置専用 (/) にして、クエリパラメータ名 (例: $name) と衝突しないようにする
+    return run_query(load_queries(filename)[query_name], **params)

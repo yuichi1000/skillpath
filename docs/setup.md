@@ -38,8 +38,12 @@ docker compose ps # STATUS が running になっていること
 
 ```bash
 cp .env.example .env   # 初回のみ (.env はアプリ起動時に自動読み込みされる)
-make schema                   # app/cypher/schema.cypher の制約・インデックスを適用
+make schema            # app/cypher/schema.cypher の制約・インデックスを適用
 ```
+
+> **注意**: `.env` をシェルに `source` しないこと。アプリ側が自動で読むため不要で、
+> 一度 export した変数はシェルに残り続け、`.env` を編集しても反映されなくなる
+> (`load_dotenv` は既存の環境変数を上書きしない)。
 
 `applied 6 schema statements` と出れば成功。
 ここが通れば Python → Bolt(7687) → Neo4j の経路がすべて動いている。
@@ -57,4 +61,4 @@ make schema                   # app/cypher/schema.cypher の制約・インデ�
 
 - **Bolt 接続エラー (`Connection refused`)**: Neo4j の起動完了前の可能性。`docker compose logs neo4j` で `Started.` が出ているか確認
 - **認証エラー**: `.env` の `NEO4J_PASSWORD` と docker-compose.yml の `NEO4J_AUTH` が一致しているか確認（既定はどちらも `localdevpassword`）
-- **環境変数が効かない**: `.env` は `app/config.py` が自動読み込みする。シェルで直接使いたい場合のみ `set -a; source .env; set +a` を実行する
+- **`.env` を編集したのに反映されない**: 過去に `source .env` したシェルには古い値が export されたまま残っている。`echo $変数名` で確認し、`unset 変数名` するか新しいターミナルを開く

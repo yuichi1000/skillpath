@@ -1,15 +1,15 @@
 """ADK Graph Workflow 定義 (設計書 §4.1)。
 
-グラフ構成 (設計書 §4.1 のうち Ingestion/Feedback 以外):
+グラフ構成 (設計書 §4.1 のうち Ingestion 以外):
 
-    START → router(LLM) → dispatch ─ StringRoute ┬ "assessment" → weakness_detector ─┐
-                                                 ├ "register" → register_stub        │
-                                                 └ "query"    → query_stub           │
-              ┌──────────────────────────────────────────────────────────────────────┘
+    START → router(LLM) → dispatch ─ StringRoute ┬ "assessment" → feedback_extract(LLM)
+                                                 ├ "register" → register_stub    │
+                                                 └ "query"    → query_stub       ▼
+              ┌──────────────────────────────────────── feedback_store → weakness_detector
               └ has_weakness? ─ True  → planner → scheduler → notifier
                               └ False → report
 
-Ingestion / Feedback (LLM ノード) は未実装。
+Ingestion (LLM ノード) は未実装。Feedback の PDF/画像入力も未対応 (テキストのみ)。
 scheduler の空き時間は Calendar FreeBusy 接続まで placeholder_free_slots で代用。
 
 ADK の約束事:
@@ -24,10 +24,11 @@ from google.adk.events import Event
 from google.adk.workflow import START, Workflow, node
 from pydantic import BaseModel, Field
 
-from app.models.schemas import PlannerOutput, RouterOutput, WeaknessOutput
+from app.models.schemas import FeedbackOutput, PlannerOutput, RouterOutput, WeaknessOutput
 from app.workflow import notifier as notifier_mod
-from app.workflow.router import build_router
+from app.workflow.feedback import build_feedback_extractor, store_feedback
 from app.workflow.planner import build_plan
+from app.workflow.router import build_router
 from app.workflow.scheduler import SessionDraft, allocate_sessions, placeholder_free_slots
 from app.workflow.weakness import DEFAULT_THRESHOLD, detect_weakness
 
@@ -36,10 +37,12 @@ class WorkflowState(BaseModel):
     """グラフ全体の共有状態。"""
 
     uid: str = ""
+    user_input: str = ""  # ユーザー入力の原文 (intake が保存し、feedback_extract 等へ渡す)
     assessment_id: str = ""
     threshold: float = DEFAULT_THRESHOLD
     schedule_start: str = ""  # ISO 日時。空なら now()。テストでの固定用
     router_output: RouterOutput | None = None
+    feedback_output: FeedbackOutput | None = None
     weakness: WeaknessOutput | None = None
     plan: PlannerOutput | None = None
     sessions: list[SessionDraft] = Field(default_factory=list)
@@ -47,10 +50,19 @@ class WorkflowState(BaseModel):
     summary: str = ""
 
 
+@node(name="intake")
+def intake_node(ctx, node_input: str):
+    # ADK の LLM ノードは single_turn で「直前ノードの出力」しか見ないため、
+    # 入口で原文を state に保存しておく (後段の feedback_extract が使う)
+    ctx.state["user_input"] = node_input
+    return node_input
+
+
 @node(name="dispatch")
-def dispatch_node(ctx, router_output: RouterOutput):
-    # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード
-    return Event(output=router_output.model_dump(), route=router_output.intent)
+def dispatch_node(ctx, router_output: RouterOutput, user_input: str):
+    # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード。
+    # 出力は原文にする — 次の LLM ノード (feedback_extract) の入力になるため
+    return Event(output=user_input, route=router_output.intent)
 
 
 @node(name="register_stub")
@@ -65,6 +77,14 @@ def query_node(ctx):
     msg = "質問応答 (query) は未実装です。"
     ctx.state["summary"] = msg
     return msg
+
+
+@node(name="feedback_store")
+def feedback_store_node(ctx, uid: str, feedback_output: FeedbackOutput):
+    # 名寄せ + 決定的な assessment_id 採番 + Neo4j 書き込み (Assessment/ASSESSED/習熟度EMA)
+    assessment_id = store_feedback(uid, feedback_output)
+    ctx.state["assessment_id"] = assessment_id
+    return {"assessment_id": assessment_id, "skills": len(feedback_output.per_skill)}
 
 
 @node(name="weakness_detector")
@@ -126,17 +146,20 @@ def build_workflow(with_router: bool = True) -> Workflow:
         (planner_node, scheduler_node, notifier_node),
     ]
     if with_router:
+        feedback_agent = build_feedback_extractor()
         edges = [
             (
                 START,
+                intake_node,
                 build_router(),
                 dispatch_node,
                 {
-                    "assessment": weakness_node,
+                    "assessment": feedback_agent,
                     "register": register_node,
                     "query": query_node,
                 },
             ),
+            (feedback_agent, feedback_store_node, weakness_node),
             *branch,
         ]
     else:

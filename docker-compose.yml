@@ -1,0 +1,11 @@
+# ローカル開発用 Neo4j。本番は infra/ の GCE VM (Terraform) を使う。
+services:
+  neo4j:
+    image: neo4j:5-community
+    ports:
+      - "7474:7474"   # HTTP (Neo4j Browser)
+      - "7687:7687"   # Bolt
+    environment:
+      NEO4J_AUTH: neo4j/localdevpassword
+    volumes:
+      - ./neo4j-data:/data

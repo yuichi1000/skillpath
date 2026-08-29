@@ -49,3 +49,8 @@ variable "upload_bucket_name" {
 variable "allow_unauthenticated" {
   type = bool
 }
+
+variable "allowed_uids" {
+  type    = string
+  default = "demo-user"
+}

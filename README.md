@@ -124,6 +124,33 @@ gcloud compute start-iap-tunnel skillpath-neo4j 7687 --local-host-port=localhost
 Cloud Run scales to zero; after the demo the Neo4j VM can be stopped with
 `terraform apply -var neo4j_desired_status=TERMINATED` (data disk survives).
 
+## Guardrails
+
+The LLM is never trusted: a deterministic layer sits between model output and
+every side effect.
+
+- **Schema validation with lenient coercion** — extractor output must fit typed
+  Pydantic schemas; nulls/unknown enums/ranges are normalized, only the
+  structure and entity-resolution keys are strict.
+- **Write caps** — per request: ≤50 skills, ≤20 resources, ≤100 edges, ≤30
+  scores; names cleaned and truncated. A "generate 1000 skills" injection
+  cannot flood the graph (covered by a live adversarial test).
+- **Temporal sanity** — a future exam date can never become an assessment
+  timestamp (`safe_taken_at`).
+- **API protection** — `/admin/*` requires `X-Admin-Token` (closed by default);
+  `/run` validates uid format, caps message size (8k chars), honors an
+  `ALLOWED_UIDS` allowlist, and rate-limits per minute. LLM failures return a
+  structured 502, never a stack trace.
+- **Resilience** — LLM nodes retry transient failures (3 attempts, exponential
+  backoff); calendar outages degrade to placeholder slots with a warning
+  instead of failing the workflow.
+- **Adversarial tests** — `pytest -m llm` includes prompt-injection and
+  mass-generation attacks against the live model.
+
+Known limits (post-hackathon work): no end-user authentication binding uids to
+callers, and the rate limiter is per-instance (a WAF / distributed limiter
+would be next).
+
 ## Hackathon requirement mapping
 
 - **Gemini 3.5+** — `gemini-3.5-flash` via Vertex AI (model ids externalized as env vars)

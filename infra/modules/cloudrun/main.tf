@@ -1,3 +1,22 @@
+# /admin/* 保護用トークン (ガードレール)。neo4j パスワードと同じ Secret Manager パターン
+resource "random_password" "admin_token" {
+  length  = 32
+  special = false
+}
+
+resource "google_secret_manager_secret" "admin_token" {
+  secret_id = "skillpath-admin-token"
+
+  replication {
+    auto {}
+  }
+}
+
+resource "google_secret_manager_secret_version" "admin_token" {
+  secret      = google_secret_manager_secret.admin_token.id
+  secret_data = random_password.admin_token.result
+}
+
 resource "google_cloud_run_v2_service" "workflow" {
   name                = "skillpath-workflow"
   location            = var.region
@@ -75,6 +94,20 @@ resource "google_cloud_run_v2_service" "workflow" {
       env {
         name  = "CALENDAR_ENABLED"
         value = "true" # トークン未登録の間は自動でプレースホルダにフォールバックする
+      }
+      # ---- ガードレール ----
+      env {
+        name = "ADMIN_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.admin_token.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name  = "ALLOWED_UIDS"
+        value = var.allowed_uids
       }
     }
   }

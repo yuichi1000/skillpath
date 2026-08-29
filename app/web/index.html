@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkillPath — 学習の帳面</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@500;700&family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<style>
+  :root {
+    --paper: #f7f4ec;
+    --paper-deep: #efe9db;
+    --ink: #26221b;
+    --ink-faint: #6f6858;
+    --rule: #d9d1bd;
+    --shu: #b3341e;      /* 弱点 */
+    --kohji: #c8752a;    /* 未習熟の前提 */
+    --matsuba: #47663f;  /* 習熟 */
+    --nezu: #8f897b;     /* 未評価 */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { color-scheme: light; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font: 14px/1.75 "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    background-image: linear-gradient(var(--rule) 1px, transparent 1px);
+    background-size: 100% 100vh;
+    background-repeat: no-repeat;
+    background-position: 0 72px;
+  }
+  .serif { font-family: "Shippori Mincho", "Noto Serif JP", serif; }
+  .num { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: .92em; letter-spacing: .02em; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 18px 28px 12px; border-bottom: 2px solid var(--ink);
+  }
+  header h1 { font-family: "Shippori Mincho", serif; font-size: 26px; font-weight: 600; letter-spacing: .08em; }
+  header h1 small { font-size: 12px; color: var(--ink-faint); letter-spacing: .2em; margin-left: 14px; }
+  #certLine { font-size: 12px; color: var(--ink-faint); }
+  #certLine b { color: var(--ink); font-weight: 600; }
+
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 0; min-height: calc(100vh - 60px); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  /* ---- 左: 記入欄 ---- */
+  #inputPane { border-right: 1px solid var(--rule); padding: 22px 24px; }
+  .paneTitle {
+    font-family: "Shippori Mincho", serif; font-size: 15px; font-weight: 600;
+    letter-spacing: .12em; margin-bottom: 4px;
+  }
+  .paneNote { font-size: 11.5px; color: var(--ink-faint); margin-bottom: 14px; }
+  .hr { border: 0; border-top: 1px solid var(--rule); margin: 18px 0; }
+
+  textarea {
+    width: 100%; height: 300px; resize: vertical;
+    background: #fffdf7; color: var(--ink);
+    border: 1px solid var(--ink); padding: 12px 14px;
+    font: 13px/1.9 "Hiragino Kaku Gothic ProN", sans-serif;
+    background-image: repeating-linear-gradient(transparent, transparent 23.7px, var(--paper-deep) 24.7px);
+  }
+  textarea:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
+
+  .samples { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+  button {
+    appearance: none; cursor: pointer; border-radius: 0;
+    border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
+    font: 12.5px/1 "Hiragino Kaku Gothic ProN", sans-serif; padding: 8px 12px;
+  }
+  button:hover { background: var(--paper-deep); }
+  button:disabled { opacity: .45; cursor: default; }
+  #runBtn {
+    width: 100%; margin-top: 14px; padding: 13px;
+    background: var(--ink); color: var(--paper);
+    font-size: 14px; letter-spacing: .3em; text-indent: .3em;
+  }
+  #runBtn:hover:not(:disabled) { background: #000; }
+
+  .uidRow { display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 12px; color: var(--ink-faint); }
+  .uidRow input {
+    border: 0; border-bottom: 1px solid var(--rule); background: transparent;
+    font: 12px ui-monospace, monospace; color: var(--ink); width: 110px; padding: 2px 4px;
+  }
+
+  #status { margin-top: 14px; font-size: 12.5px; min-height: 20px; color: var(--ink-faint); }
+  #status.err { color: var(--shu); }
+  #status .spin { display: inline-block; animation: kaiten 1.4s linear infinite; }
+  @keyframes kaiten { to { transform: rotate(360deg); } }
+
+  /* ---- 右: 帳面本体 ---- */
+  #resultPane { padding: 22px 30px 60px; overflow-x: hidden; }
+  section { margin-bottom: 34px; }
+  section > h2 {
+    font-family: "Shippori Mincho", serif; font-size: 16px; font-weight: 600;
+    letter-spacing: .14em; padding-bottom: 6px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--ink);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  section > h2 .cap { font-family: inherit; font-size: 11px; color: var(--ink-faint); letter-spacing: .06em; }
+
+  /* グラフ */
+  #graphWrap { border: 1px solid var(--rule); background: #fbf9f2; position: relative; }
+  #graphSvg { display: block; width: 100%; height: 430px; }
+  #legend {
+    position: absolute; right: 10px; top: 10px; background: rgba(247,244,236,.92);
+    border: 1px solid var(--rule); padding: 8px 12px; font-size: 11px; line-height: 2;
+  }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: baseline; }
+
+  /* 学習計画 */
+  #planList { list-style: none; }
+  #planList li {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 9px 4px; border-bottom: 1px dashed var(--rule);
+  }
+  #planList .no { font-family: "Shippori Mincho", serif; width: 26px; text-align: right; color: var(--ink-faint); }
+  #planList .nm { flex: 1; }
+  #planList .min { color: var(--ink-faint); }
+
+  /* 時間割 */
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+  th {
+    font-weight: 600; font-size: 11px; letter-spacing: .15em; color: var(--ink-faint);
+    border-bottom: 1px solid var(--ink);
+  }
+  td.day { white-space: nowrap; }
+  tr.newday td { border-top: 1px solid var(--ink-faint); }
+
+  /* 模試の記録 */
+  .assess { border-left: 3px solid var(--ink); padding: 4px 0 4px 16px; margin-bottom: 18px; }
+  .assess .head { display: flex; gap: 14px; align-items: baseline; margin-bottom: 4px; }
+  .assess .date { font-family: "Shippori Mincho", serif; font-weight: 600; }
+  .assess .src { font-size: 12px; color: var(--ink-faint); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; }
+  .chips .up { color: var(--matsuba); }
+  .chips .down { color: var(--shu); }
+
+  /* 所見 */
+  #summaryBox {
+    white-space: pre-wrap; background: #fffdf7; border: 1px solid var(--rule);
+    border-left: 3px solid var(--ink); padding: 16px 20px; font-size: 13px; line-height: 2.0;
+  }
+  .warn { border-left: 3px solid var(--shu); background: #fbf3ef; padding: 8px 14px; margin-top: 10px; font-size: 12.5px; }
+
+  .empty { color: var(--ink-faint); font-size: 12.5px; padding: 8px 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>SkillPath<small>学習の帳面 — 弱点は、前提まで遡って直す</small></h1>
+  <div id="certLine"></div>
+</header>
+
+<main>
+  <div id="inputPane">
+    <div class="paneTitle">記入欄</div>
+    <div class="paneNote">資格シラバスの登録、または模試結果の報告を貼り付けてください。</div>
+    <textarea id="message" placeholder="例: 「G検定を受験したい。シラバスは…」&#10;例: 「模試の結果です。CNN: 9/20…」"></textarea>
+    <div class="samples">
+      <button data-sample="syllabus">記入例: シラバス登録</button>
+      <button data-sample="exam1">記入例: 模試 一回目</button>
+      <button data-sample="exam2">記入例: 模試 二回目(改善)</button>
+    </div>
+    <button id="runBtn">実 行</button>
+    <div class="uidRow"><span>学習者:</span><input id="uid" value="demo-user"></div>
+    <div id="status"></div>
+    <hr class="hr">
+    <div class="paneNote">
+      実行すると、エージェントが意図を判定し、スキルグラフの更新・弱点クラスタの検出・
+      学習計画の再作成・Google カレンダーへの登録までを自律的に行います(20〜60秒)。
+      同じ模試を貼り直しても予定は重複しません。
+    </div>
+  </div>
+
+  <div id="resultPane">
+    <section>
+      <h2>知識グラフ <span class="cap">弱点と、その前提を遡って照らす</span></h2>
+      <div id="graphWrap">
+        <svg id="graphSvg"></svg>
+        <div id="legend">
+          <span class="sw" style="background:var(--shu)"></span>弱点(直近模試 6割未満)<br>
+          <span class="sw" style="background:var(--kohji)"></span>未習熟の前提<br>
+          <span class="sw" style="background:var(--matsuba)"></span>習熟済み<br>
+          <span class="sw" style="background:var(--paper);border:1.5px solid var(--nezu)"></span>未評価
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>学習計画 <span class="cap">前提が先に来る順序</span></h2>
+      <ol id="planList"><li class="empty">まだ計画はありません。左の記入欄から実行してください。</li></ol>
+    </section>
+
+    <section>
+      <h2>時間割 <span class="cap">カレンダーにも同じ内容を登録済み</span></h2>
+      <div id="scheduleWrap"><div class="empty">まだ予定はありません。</div></div>
+    </section>
+
+    <section>
+      <h2>模試の記録 <span class="cap">回を重ねるごとの変化</span></h2>
+      <div id="assessWrap"><div class="empty">まだ記録はありません。</div></div>
+    </section>
+
+    <section>
+      <h2>所見</h2>
+      <div id="summaryBox" class="empty">実行すると、エージェントの所見がここに記されます。</div>
+      <div id="warnBox"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const SAMPLES = {
+  syllabus: `JDLA E資格 を受験したいので登録してください。
+シラバス抜粋:
+1. 応用数学
+  - 情報理論 (学習目安 4時間)
+  - ベイズ則 (学習目安 4時間)
+2. 深層学習の実装
+  - 最適化手法 SGD/Adam (学習目安 6時間)
+  - 正則化 ドロップアウト/バッチ正規化 (学習目安 5時間)
+※「最適化手法 SGD/Adam」と「正則化 ドロップアウト/バッチ正規化」の理解には
+  「情報理論」「ベイズ則」の内容が前提となる。
+教材: 「ゼロから作るDeep Learning(デモ)」の4-6章が最適化手法と正則化をカバーする。`,
+  exam1: `模試の結果を報告します。本試験は 2026年11月15日 です。復習計画をお願いします。
+G検定 模擬試験 第2回 (2026-08-29 受験)
+総合: 62/100
+分野別:
+- 機械学習基礎: 8/10
+- ディープラーニング手法: 12/20
+- CNN(画像認識): 9/20
+- 自然言語処理: 10/20
+- AI倫理・法律: 9/10`,
+  exam2: `模試の結果を報告します。前回の復習を終えたので再計画をお願いします。
+G検定 模擬試験 第3回 (2026-09-10 受験)
+総合: 81/100
+分野別:
+- 機械学習基礎: 9/10
+- ディープラーニング手法: 16/20
+- CNN(画像認識): 15/20
+- 自然言語処理: 14/20
+- AI倫理・法律: 9/10`,
+};
+
+const $ = (s) => document.querySelector(s);
+const WEEKDAYS = ["日","月","火","水","木","金","土"];
+
+document.querySelectorAll("[data-sample]").forEach(b =>
+  b.addEventListener("click", () => { $("#message").value = SAMPLES[b.dataset.sample]; }));
+
+// ---------- 実行 ----------
+let timerId = null;
+$("#runBtn").addEventListener("click", async () => {
+  const message = $("#message").value.trim();
+  const uid = $("#uid").value.trim();
+  if (!message) { setStatus("記入欄が空です。", true); return; }
+
+  const btns = document.querySelectorAll("button");
+  btns.forEach(b => b.disabled = true);
+  const t0 = Date.now();
+  timerId = setInterval(() => {
+    const s = Math.floor((Date.now() - t0) / 1000);
+    setStatus(`<span class="spin">◐</span> エージェント稼働中 … ${s} 秒`);
+  }, 500);
+
+  try {
+    const res = await fetch("/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uid, message }),
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      const d = body.detail;
+      throw new Error(typeof d === "string" ? d : (d?.error || "エラー") + (d?.hint ? ` — ${d.hint}` : ""));
+    }
+    renderRun(body);
+    await loadGraph(uid);
+    setStatus(`完了 (${Math.floor((Date.now()-t0)/1000)}秒) — 判定: ${labelIntent(body.intent)}`);
+  } catch (e) {
+    setStatus(String(e.message || e), true);
+  } finally {
+    clearInterval(timerId);
+    btns.forEach(b => b.disabled = false);
+  }
+});
+
+function setStatus(html, isErr) {
+  const el = $("#status");
+  el.innerHTML = html;
+  el.classList.toggle("err", !!isErr);
+}
+function labelIntent(i) {
+  return { register: "学習対象の登録", assessment: "模試の報告", query: "質問" }[i] || i;
+}
+
+// ---------- 実行結果の描画 ----------
+function renderRun(d) {
+  // 学習計画
+  const plan = d.plan?.plan || [];
+  $("#planList").innerHTML = plan.length
+    ? plan.map(p => `<li><span class="no serif">${p.order}</span>` +
+        `<span class="nm">${esc(p.name || p.skill_id)}</span>` +
+        `<span class="min num">${p.estimated_minutes}分</span></li>`).join("")
+    : `<li class="empty">計画対象はありませんでした。</li>`;
+
+  // 時間割
+  const ses = d.sessions || [];
+  if (ses.length) {
+    let prevDay = "";
+    const rows = ses.map(s => {
+      const st = new Date(s.start), en = new Date(s.end);
+      const day = `${st.getMonth()+1}/${st.getDate()}(${WEEKDAYS[st.getDay()]})`;
+      const cls = day !== prevDay && prevDay !== "" ? "newday" : "";
+      const dayCell = day !== prevDay ? day : "";
+      prevDay = day;
+      const nm = (d.plan?.plan || []).find(p => p.skill_id === s.skill_id);
+      return `<tr class="${cls}"><td class="day serif">${dayCell}</td>` +
+             `<td class="num">${hm(st)}–${hm(en)}</td><td>${esc(nm?.name || s.skill_id)}</td></tr>`;
+    }).join("");
+    $("#scheduleWrap").innerHTML =
+      `<table><thead><tr><th>日付</th><th>時刻</th><th>学習内容</th></tr></thead><tbody>${rows}</tbody></table>`;
+  } else {
+    $("#scheduleWrap").innerHTML = `<div class="empty">予定は作成されませんでした。</div>`;
+  }
+
+  // 所見と注意
+  $("#summaryBox").classList.remove("empty");
+  $("#summaryBox").textContent = d.summary || "(所見なし)";
+  $("#warnBox").innerHTML = (d.schedule_warnings || [])
+    .map(w => `<div class="warn">${esc(w)}</div>`).join("");
+}
+const hm = (t) => `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- グラフ ----------
+async function loadGraph(uid) {
+  const res = await fetch(`/graph?uid=${encodeURIComponent(uid)}`);
+  if (!res.ok) return;
+  const g = await res.json();
+  renderCerts(g.certifications || []);
+  renderAssessments(g.assessments || []);
+  drawGraph(g);
+}
+
+function renderCerts(certs) {
+  $("#certLine").innerHTML = certs.length
+    ? "対象資格: " + certs.map(c => `<b>${esc(c.name)}</b>`).join(" / ")
+    : "";
+}
+
+function classify(nodes, edges) {
+  const weak = new Set(nodes.filter(n => n.latest_score != null && n.latest_score < 0.6).map(n => n.id));
+  const byTarget = {};
+  edges.forEach(e => (byTarget[e.target] ??= []).push(e.source));
+  const mastery = Object.fromEntries(nodes.map(n => [n.id, n.mastery]));
+  const prereq = new Set();
+  const stack = [...weak];
+  const seen = new Set(stack);
+  while (stack.length) {
+    for (const src of (byTarget[stack.pop()] || [])) {
+      if (seen.has(src)) continue;
+      seen.add(src); stack.push(src);
+      if (!weak.has(src) && (mastery[src] ?? -1) < 0.6) prereq.add(src);
+    }
+  }
+  return { weak, prereq };
+}
+
+function drawGraph(g) {
+  const svg = d3.select("#graphSvg");
+  svg.selectAll("*").remove();
+  const { width } = svg.node().getBoundingClientRect();
+  const height = 430;
+  if (!g.nodes.length) return;
+
+  const { weak, prereq } = classify(g.nodes, g.edges);
+  const color = (n) =>
+    weak.has(n.id) ? css("--shu") :
+    prereq.has(n.id) ? css("--kohji") :
+    n.mastery >= 0.6 ? css("--matsuba") : css("--paper");
+  const stroke = (n) =>
+    weak.has(n.id) || prereq.has(n.id) || n.mastery >= 0.6 ? css("--ink") : css("--nezu");
+
+  svg.append("defs").append("marker")
+    .attr("id", "arrow").attr("viewBox", "0 -4 8 8")
+    .attr("refX", 20).attr("markerWidth", 7).attr("markerHeight", 7).attr("orient", "auto")
+    .append("path").attr("d", "M0,-3.5L8,0L0,3.5").attr("fill", "#b9b19d");
+
+  const nodes = g.nodes.map(n => ({ ...n }));
+  const links = g.edges.map(e => ({ ...e }));
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(links).id(d => d.id).distance(105).strength(.7))
+    .force("charge", d3.forceManyBody().strength(-260))
+    .force("center", d3.forceCenter(width / 2, height / 2))
+    .force("x", d3.forceX(width / 2).strength(.07))
+    .force("y", d3.forceY(height / 2).strength(.11))
+    .force("collide", d3.forceCollide(32));
+  // レイアウトは同期計算して静置する (RAF が止まるバックグラウンドタブでも崩れない。
+  // 紙面のように「組み終わった状態」で現れる)
+  sim.stop();
+  sim.tick(260);
+
+  const link = svg.append("g").selectAll("line").data(links).join("line")
+    .attr("stroke", "#c7bfa9").attr("stroke-width", d => .6 + d.strength)
+    .attr("marker-end", "url(#arrow)");
+
+  const node = svg.append("g").selectAll("g").data(nodes).join("g")
+    .call(d3.drag()
+      .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(.25).restart(); d.fx = d.x; d.fy = d.y; })
+      .on("drag", (ev, d) => { d.fx = ev.x; d.fy = ev.y; })
+      .on("end", (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+  node.append("circle")
+    .attr("r", d => 7 + Math.min(7, (d.estimated_hours || 1)))
+    .attr("fill", color).attr("stroke", stroke).attr("stroke-width", 1.4);
+
+  node.append("text")
+    .text(d => d.name.length > 14 ? d.name.slice(0, 13) + "…" : d.name)
+    .attr("dy", d => 7 + Math.min(7, (d.estimated_hours || 1)) + 13)
+    .attr("text-anchor", "middle")
+    .style("font-size", "10.5px").style("fill", css("--ink"))
+    .style("paint-order", "stroke").style("stroke", css("--paper")).style("stroke-width", "3px");
+
+  node.append("title").text(d =>
+    `${d.name}\n習熟度: ${d.mastery < 0 ? "未評価" : Math.round(d.mastery * 100) + "%"}` +
+    (d.latest_score != null ? `\n直近模試: ${Math.round(d.latest_score * 100)}%` : ""));
+
+  function updatePositions() {
+    nodes.forEach(d => {
+      d.x = Math.max(24, Math.min(width - 24, d.x));
+      d.y = Math.max(20, Math.min(height - 30, d.y));
+    });
+    link.attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+    node.attr("transform", d => `translate(${d.x},${d.y})`);
+  }
+  updatePositions();
+  sim.on("tick", updatePositions); // ドラッグ時の追従用
+}
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ---------- 模試の記録 ----------
+function renderAssessments(assessments) {
+  if (!assessments.length) {
+    $("#assessWrap").innerHTML = `<div class="empty">まだ記録はありません。</div>`;
+    return;
+  }
+  const prevScore = {}; // skill_id -> 前回スコア
+  const blocks = assessments.map(a => {
+    const date = (a.taken_at || "").slice(0, 10);
+    const chips = (a.per_skill || []).filter(p => p.skill_id).map(p => {
+      const prev = prevScore[p.skill_id];
+      prevScore[p.skill_id] = p.score;
+      const pct = Math.round(p.score * 100) + "%";
+      if (prev == null) return `<span>${esc(p.name)} <b class="num">${pct}</b></span>`;
+      const diff = Math.round((p.score - prev) * 100);
+      const cls = diff >= 0 ? "up" : "down";
+      const mark = diff >= 0 ? "△" : "▼";
+      return `<span>${esc(p.name)} <b class="num">${pct}</b>` +
+             ` <span class="${cls} num">${mark}${Math.abs(diff)}</span></span>`;
+    }).join("");
+    const total = a.total_score != null ? `総合 <b class="num">${Math.round(a.total_score * 100)}%</b>` : "";
+    return `<div class="assess"><div class="head">` +
+           `<span class="date">${esc(date)}</span>` +
+           `<span class="src">${esc(a.source || "")}</span><span>${total}</span></div>` +
+           `<div class="chips">${chips}</div></div>`;
+  });
+  $("#assessWrap").innerHTML = blocks.join("");
+}
+
+// ---------- 初期表示 ----------
+loadGraph($("#uid").value);
+</script>
+</body>
+</html>

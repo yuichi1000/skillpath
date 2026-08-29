@@ -17,14 +17,17 @@ import logging
 import time
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.tools.init_schema import init_schema
+from app.tools.neo4j_tool import run_named
 from app.tools.seed_demo import seed
 from app.workflow.graph import build_workflow
 
@@ -101,6 +104,30 @@ class RunResponse(BaseModel):
     plan: dict | None = None
     sessions: list[dict] = []
     schedule_warnings: list[str] = []
+
+
+WEB_INDEX = Path(__file__).resolve().parent / "web" / "index.html"
+
+
+@app.get("/")
+async def index() -> FileResponse:
+    return FileResponse(WEB_INDEX, media_type="text/html")
+
+
+@app.get("/graph")
+async def graph(uid: str = Query(pattern=r"^[A-Za-z0-9_-]{1,64}$")) -> dict:
+    """UI のグラフ可視化用データ (uid 分離)。"""
+    allowed = get_settings().allowed_uids
+    if allowed and uid not in allowed:
+        raise HTTPException(status_code=403, detail="uid is not allowed on this deployment")
+    rows = run_named("graph_view.cypher", "user_skill_ids", uid=uid)
+    skill_ids = rows[0]["ids"] if rows else []
+    return {
+        "nodes": run_named("graph_view.cypher", "graph_nodes", uid=uid, skill_ids=skill_ids),
+        "edges": run_named("graph_view.cypher", "graph_edges", skill_ids=skill_ids),
+        "certifications": run_named("graph_view.cypher", "graph_certs", skill_ids=skill_ids),
+        "assessments": run_named("graph_view.cypher", "graph_assessments", uid=uid),
+    }
 
 
 @app.get("/health")

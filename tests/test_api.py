@@ -10,6 +10,14 @@ async def client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
+async def test_index_serves_ui():
+    async with await client() as c:
+        res = await c.get("/")
+    assert res.status_code == 200
+    assert "SkillPath" in res.text
+    assert "知識グラフ" in res.text
+
+
 async def test_health():
     async with await client() as c:
         res = await c.get("/health")
@@ -55,3 +63,26 @@ async def test_run_assessment_flow(weakness_graph):
     assert body["intent"] == "assessment"
     assert body["assessment_id"].startswith("test-w-user-assess-")
     assert body["summary"]
+
+
+async def test_graph_view(neo4j, weakness_graph):
+    async with await client() as c:
+        res = await c.get("/graph", params={"uid": "test-w-user"})
+    assert res.status_code == 200
+    body = res.json()
+    ids = {n["id"] for n in body["nodes"]}
+    assert {"test-w-ml", "test-w-stats", "test-w-math"} <= ids
+    assert any(
+        e["source"] == "test-w-math" and e["target"] == "test-w-stats" for e in body["edges"]
+    )
+    # 習熟度と直近スコアがノードに載る
+    ml = next(n for n in body["nodes"] if n["id"] == "test-w-ml")
+    assert ml["latest_score"] == 0.4
+    assert len(body["assessments"]) >= 1
+
+
+async def test_graph_view_respects_allowlist(monkeypatch, neo4j):
+    monkeypatch.setenv("ALLOWED_UIDS", "demo-user")
+    async with await client() as c:
+        res = await c.get("/graph", params={"uid": "test-w-user"})
+    assert res.status_code == 403

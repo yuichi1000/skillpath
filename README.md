@@ -10,7 +10,9 @@ replicate), plans a study order via topological sort, back-calculates against yo
 date, and **writes the study blocks into your real Google Calendar** around your
 existing appointments.
 
-Live service: `https://skillpath-workflow-924686405565.asia-northeast1.run.app` (see `/docs`)
+Live service: `https://skillpath-workflow-924686405565.asia-northeast1.run.app` —
+open it in a browser for the web UI (paste a syllabus or mock-exam result, watch the
+knowledge graph recolor), or see `/docs` for the API.
 
 ## Try it
 

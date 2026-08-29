@@ -6,7 +6,6 @@ neo4j-data/
 infra/
 tests/
 docs/
-web/
 .claude/
 CLAUDE.md
 skillpath-design.md

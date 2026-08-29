@@ -23,6 +23,13 @@ async def test_init_schema(neo4j):
     assert res.json()["applied"] == 6
 
 
+async def test_seed_demo(neo4j):
+    async with await client() as c:
+        res = await c.post("/admin/seed-demo")
+    assert res.status_code == 200
+    assert res.json()["applied"] > 0
+
+
 async def test_ingestion_task_stub():
     async with await client() as c:
         res = await c.post("/tasks/ingestion")

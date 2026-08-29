@@ -15,6 +15,7 @@ from google.genai import types
 from pydantic import BaseModel
 
 from app.tools.init_schema import init_schema
+from app.tools.seed_demo import seed
 from app.workflow.graph import build_workflow
 
 app = FastAPI(title="SkillPath", version="0.1.0")
@@ -92,6 +93,13 @@ async def run(req: RunRequest) -> RunResponse:
 async def admin_init_schema() -> dict:
     applied = init_schema()
     return {"applied": applied}
+
+
+@app.post("/admin/seed-demo")
+async def admin_seed_demo() -> dict:
+    # クラウド上の Neo4j にデモデータを投入する (冪等)。デモ準備用
+    statements = seed()
+    return {"applied": statements}
 
 
 @app.post("/tasks/ingestion", status_code=202)

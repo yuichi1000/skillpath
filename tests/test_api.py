@@ -9,9 +9,9 @@ async def client() -> AsyncClient:
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def test_healthz():
+async def test_health():
     async with await client() as c:
-        res = await c.get("/healthz")
+        res = await c.get("/health")
     assert res.status_code == 200
     assert res.json() == {"status": "ok"}
 

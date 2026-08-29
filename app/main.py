@@ -1,7 +1,7 @@
 """FastAPI エントリポイント (Cloud Run) — 設計書 §8。
 
 エンドポイント:
-- GET  /healthz         死活監視
+- GET  /health         死活監視
 - POST /run             ワークフロー実行 (Web UI / デモが使用)
 - POST /admin/init-schema  Neo4j スキーマ初期化 (設計書 §7.10)
 - POST /tasks/ingestion Pub/Sub push 受け口 (現状スタブ)
@@ -50,8 +50,8 @@ class RunResponse(BaseModel):
     schedule_warnings: list[str] = []
 
 
-@app.get("/healthz")
-async def healthz() -> dict:
+@app.get("/health")
+async def health() -> dict:
     return {"status": "ok"}
 
 

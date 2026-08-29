@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.12"
+    }
   }
 
   # 設計書 §7.2 は GCS backend だが、ハッカソンでは bootstrap を減らすためローカル state。

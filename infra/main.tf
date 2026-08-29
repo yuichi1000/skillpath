@@ -25,27 +25,33 @@ resource "google_project_service" "apis" {
   disable_on_destroy = false
 }
 
+# API 有効化の伝播待ち (有効化直後にリソース作成すると 403 SERVICE_DISABLED になるため)
+resource "time_sleep" "api_propagation" {
+  depends_on      = [google_project_service.apis]
+  create_duration = "60s"
+}
+
 # 設計書に無かった差分: gcloud builds submit の push 先リポジトリ
 resource "google_artifact_registry_repository" "workflow" {
   location      = var.region
   repository_id = "skillpath"
   format        = "DOCKER"
 
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.api_propagation]
 }
 
 module "network" {
   source = "./modules/network"
   region = var.region
 
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.api_propagation]
 }
 
 module "iam" {
   source     = "./modules/iam"
   project_id = var.project_id
 
-  depends_on = [google_project_service.apis]
+  depends_on = [time_sleep.api_propagation]
 }
 
 module "neo4j" {

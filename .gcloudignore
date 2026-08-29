@@ -1,0 +1,13 @@
+# Cloud Build へアップロードしないもの (ビルドに必要なのは pyproject/app/Dockerfile のみ)
+.git/
+.venv/
+.env
+neo4j-data/
+infra/
+tests/
+docs/
+web/
+.claude/
+CLAUDE.md
+skillpath-design.md
+*.md

@@ -1,7 +1,7 @@
 """Feedback Agent (設計書 §4.2) — 模試結果の解析と Neo4j への書き込み。
 
 2段構成:
-- build_feedback_extractor(): LlmAgent (Gemini Pro) が貼り付けテキストから
+- build_feedback_extractor(): LlmAgent が貼り付けテキストから
   分野別スコアを FeedbackOutput へ構造化抽出 (output_schema で検証)
 - store_feedback(): 決定的処理。スキル名の名寄せ、assessment_id の決定的生成、
   feedback.cypher による Assessment/ASSESSED/COMPLETED(指数移動平均) の書き込み
@@ -43,7 +43,7 @@ def build_feedback_extractor() -> LlmAgent:
     settings = get_settings()
     return LlmAgent(
         name="feedback_extract",
-        model=settings.gemini_model_pro,
+        model=settings.gemini_model_extract,
         instruction=FEEDBACK_INSTRUCTION,
         output_schema=FeedbackOutput,
         output_key=FEEDBACK_OUTPUT_KEY,

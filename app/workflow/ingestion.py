@@ -1,7 +1,7 @@
 """Ingestion Agent (設計書 §4.2) — 学習対象の登録とスキルグラフ構築。
 
 2段構成 (Feedback と同じパターン):
-- build_ingestion_extractor(): LlmAgent (Gemini Pro) がシラバス・目次テキストから
+- build_ingestion_extractor(): LlmAgent がシラバス・目次テキストから
   skills / resources / prerequisites / covers を IngestionOutput へ構造化抽出
 - store_ingestion(): 決定的処理。名寄せで仮ID(名前)→実IDのマップを作り、
   ingestion.cypher の MERGE 群で冪等に書き込む。未習熟の登録スキルを
@@ -41,7 +41,7 @@ def build_ingestion_extractor() -> LlmAgent:
     settings = get_settings()
     return LlmAgent(
         name="ingestion_extract",
-        model=settings.gemini_model_pro,
+        model=settings.gemini_model_extract,
         instruction=INGESTION_INSTRUCTION,
         output_schema=IngestionOutput,
         output_key=INGESTION_OUTPUT_KEY,

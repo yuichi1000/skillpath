@@ -6,7 +6,7 @@ Neo4j へ書き込む前に必ずこれらのスキーマで検証する (設計
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Intent = Literal["register", "assessment", "query"]
 Depth = Literal["intro", "standard", "deep"]
@@ -65,6 +65,10 @@ class ResourceIn(BaseModel):
 
 
 class PrerequisiteIn(BaseModel):
+    # LLM への JSON スキーマはフィールド名 (from_) で生成されるため、
+    # alias の "from" とフィールド名の "from_" の両方を受け付ける
+    model_config = ConfigDict(populate_by_name=True)
+
     from_: str = Field(alias="from")
     to: str
     strength: float = 0.5
@@ -97,10 +101,16 @@ class CoversIn(BaseModel):
 
 
 class IngestionOutput(BaseModel):
-    skills: list[SkillIn]
-    resources: list[ResourceIn]
-    prerequisites: list[PrerequisiteIn]
-    covers: list[CoversIn]
+    # LLM が「該当なし」のリストを省略したり null を返しても受ける
+    skills: list[SkillIn] = Field(default_factory=list)
+    resources: list[ResourceIn] = Field(default_factory=list)
+    prerequisites: list[PrerequisiteIn] = Field(default_factory=list)
+    covers: list[CoversIn] = Field(default_factory=list)
+
+    @field_validator("skills", "resources", "prerequisites", "covers", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
 
 
 # ---- Feedback Agent ----

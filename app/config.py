@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-# ローカル開発用: カレントディレクトリの .env を読み込む (既存の環境変数が優先)
-load_dotenv()
+# ローカル開発用: .env を読み込む。override=True で常に .env の値が正
+# (シェルに残った古い export に上書きされる事故を防ぐ)。
+# 本番 (Cloud Run) には .env が無いので no-op となり、Terraform 注入の環境変数が使われる
+load_dotenv(override=True)
 
 
 @dataclass(frozen=True)
@@ -18,8 +20,8 @@ class Settings:
     gemini_model: str = field(
         default_factory=lambda: os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
     )
-    gemini_model_pro: str = field(
-        default_factory=lambda: os.environ.get("GEMINI_MODEL_PRO", "gemini-3.5-pro")
+    gemini_model_extract: str = field(
+        default_factory=lambda: os.environ.get("GEMINI_MODEL_EXTRACT", "gemini-3.5-flash")
     )
     upload_bucket: str = field(default_factory=lambda: os.environ.get("GCS_UPLOAD_BUCKET", ""))
     weakness_threshold: float = 0.6

@@ -25,7 +25,7 @@ import logging
 from datetime import datetime
 
 from google.adk.events import Event
-from google.adk.workflow import START, Workflow, node
+from google.adk.workflow import START, RetryConfig, Workflow, node
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
@@ -239,13 +239,16 @@ def build_workflow(with_router: bool = True) -> Workflow:
         (planner_node, scheduler_node, notifier_node),
     ]
     if with_router:
-        feedback_agent = build_feedback_extractor()
-        ingestion_agent = build_ingestion_extractor()
+        # LLM ノードは一時的な 429/5xx で即死させず、指数バックオフで最大3回試行する
+        llm_retry = RetryConfig(max_attempts=3, initial_delay=2.0, backoff_factor=2.0)
+        feedback_agent = node(build_feedback_extractor(), retry_config=llm_retry)
+        ingestion_agent = node(build_ingestion_extractor(), retry_config=llm_retry)
+        router_agent = node(build_router(), retry_config=llm_retry)
         edges = [
             (
                 START,
                 intake_node,
-                build_router(),
+                router_agent,
                 dispatch_node,
                 {
                     "assessment": feedback_agent,

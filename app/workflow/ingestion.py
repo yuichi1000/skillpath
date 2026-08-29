@@ -15,6 +15,7 @@ from google.adk.agents import LlmAgent
 from app.config import get_settings
 from app.models.schemas import IngestionOutput
 from app.tools.neo4j_tool import run_named, run_query
+from app.workflow import sanitize
 from app.workflow.feedback import _slug, resolve_skill_id
 
 INGESTION_OUTPUT_KEY = "ingestion_output"
@@ -51,29 +52,39 @@ def build_ingestion_extractor() -> LlmAgent:
 def store_ingestion(
     uid: str, out: IngestionOutput, threshold: float
 ) -> tuple[dict, list[str]]:
-    """抽出結果を冪等に書き込み、(件数サマリ, 未習熟スキルID) を返す。"""
+    """抽出結果を冪等に書き込み、(件数サマリ, 未習熟スキルID) を返す。
+
+    LLM 出力はガードレール (sanitize) で量・長さを制限してから書き込む。
+    """
     run_query("MERGE (u:User {uid: $uid})", uid=uid)
 
     # 名寄せ: 仮ID (name / title) → 実ID のマップ
     skill_ids: dict[str, str] = {}
     skills = []
-    for sk in out.skills:
-        real_id = resolve_skill_id(sk.name)
+    for sk in sanitize.cap(out.skills, sanitize.MAX_SKILLS, "skills"):
+        name = sanitize.clean_name(sk.name)
+        if not name:
+            continue
+        real_id = resolve_skill_id(name)
         skill_ids[sk.id or sk.name] = real_id
         skill_ids[sk.name] = real_id
-        skills.append({**sk.model_dump(), "id": real_id})
+        skill_ids[name] = real_id
+        skills.append({**sk.model_dump(), "id": real_id, "name": name})
 
     resource_ids: dict[str, str] = {}
     resources = []
-    for rs in out.resources:
-        real_id = rs.id or f"res-{_slug(rs.title)}"
+    for rs in sanitize.cap(out.resources, sanitize.MAX_RESOURCES, "resources"):
+        title = sanitize.clean_name(rs.title)
+        if not title:
+            continue
+        real_id = rs.id or f"res-{_slug(title)}"
         resource_ids[rs.id or rs.title] = real_id
         resource_ids[rs.title] = real_id
-        resources.append({**rs.model_dump(), "id": real_id})
+        resources.append({**rs.model_dump(), "id": real_id, "title": title})
 
     prerequisites = [
         {"from": skill_ids[p.from_], "to": skill_ids[p.to], "strength": p.strength}
-        for p in out.prerequisites
+        for p in sanitize.cap(out.prerequisites, sanitize.MAX_PREREQUISITES, "prerequisites")
         if p.from_ in skill_ids and p.to in skill_ids
     ]
     covers = [
@@ -83,7 +94,7 @@ def store_ingestion(
             "depth": c.depth,
             "section": c.section,
         }
-        for c in out.covers
+        for c in sanitize.cap(out.covers, sanitize.MAX_COVERS, "covers")
         if c.resource_id in resource_ids and c.skill_id in skill_ids
     ]
 

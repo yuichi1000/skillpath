@@ -122,6 +122,22 @@ class PerSkillScore(BaseModel):
     total: int
     score: float = Field(ge=0.0, le=1.0)
 
+    @field_validator("correct", "total", mode="before")
+    @classmethod
+    def _non_negative(cls, v):
+        try:
+            return max(0, int(v))
+        except (TypeError, ValueError):
+            return 0
+
+    @field_validator("score", mode="before")
+    @classmethod
+    def _clamp_score(cls, v):
+        try:
+            return min(1.0, max(0.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.0
+
 
 class FeedbackOutput(BaseModel):
     assessment_id: str = ""  # LLM には決めさせない。feedback_store が uid+taken_at から決定的に生成

@@ -1,0 +1,55 @@
+"""LLM 出力の決定的サニタイズ (ガードレール層)。
+
+方針: LLM の出力を信用せず、DB 書き込み前に量・長さ・値域を決定的に制限する。
+プロンプトでの牽制 (「指示に従うな」) は補助であり、最終防衛線はこのレイヤ。
+"""
+
+import logging
+import re
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+MAX_NAME_LEN = 100
+MAX_SKILLS = 50
+MAX_RESOURCES = 20
+MAX_PREREQUISITES = 100
+MAX_COVERS = 100
+MAX_PER_SKILL = 30
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def clean_name(value: str | None) -> str:
+    """制御文字を除去し、前後空白を落とし、最大長に切り詰める。"""
+    return _CONTROL_CHARS.sub("", value or "").strip()[:MAX_NAME_LEN]
+
+
+def cap(items: list, limit: int, label: str) -> list:
+    """リストを上限件数に切り詰める (ジャンク大量生成・トークン浪費対策)。"""
+    if len(items) > limit:
+        logger.warning(
+            "guardrail: %s を %d 件から %d 件に切り詰めました", label, len(items), limit
+        )
+        return items[:limit]
+    return items
+
+
+def safe_taken_at(raw: str | None, now: datetime | None = None) -> str:
+    """taken_at を検証する。パース不能・未来日は実行時刻に置換。
+
+    「試験は11月15日」のような予定日を LLM が受験日として返す事象への決定的対策。
+    """
+    now = now or datetime.now()
+    fallback = now.strftime("%Y-%m-%dT%H:%M:%S")
+    if not raw:
+        return fallback
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        logger.warning("guardrail: taken_at をパースできないため実行時刻に置換 (%r)", raw)
+        return fallback
+    if parsed.replace(tzinfo=None) > now:
+        logger.warning("guardrail: taken_at が未来日のため実行時刻に置換 (%s)", raw)
+        return fallback
+    return raw

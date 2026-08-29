@@ -28,6 +28,16 @@ class Settings:
         default_factory=lambda: os.environ.get("CALENDAR_ENABLED", "").lower() == "true"
     )
     schedule_tz: str = field(default_factory=lambda: os.environ.get("SCHEDULE_TZ", "Asia/Tokyo"))
+    # ---- ガードレール ----
+    admin_token: str = field(default_factory=lambda: os.environ.get("ADMIN_TOKEN", ""))
+    allowed_uids: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            u.strip() for u in os.environ.get("ALLOWED_UIDS", "").split(",") if u.strip()
+        )
+    )
+    rate_limit_per_min: int = field(
+        default_factory=lambda: int(os.environ.get("RATE_LIMIT_PER_MIN", "10"))
+    )
     weakness_threshold: float = 0.6
 
 

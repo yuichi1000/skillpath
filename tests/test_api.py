@@ -17,16 +17,18 @@ async def test_health():
     assert res.json() == {"status": "ok"}
 
 
-async def test_init_schema(neo4j):
+async def test_init_schema(neo4j, monkeypatch):
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
     async with await client() as c:
-        res = await c.post("/admin/init-schema")
+        res = await c.post("/admin/init-schema", headers={"X-Admin-Token": "test-admin"})
     assert res.status_code == 200
     assert res.json()["applied"] == 6
 
 
-async def test_seed_demo(neo4j):
+async def test_seed_demo(neo4j, monkeypatch):
+    monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
     async with await client() as c:
-        res = await c.post("/admin/seed-demo")
+        res = await c.post("/admin/seed-demo", headers={"X-Admin-Token": "test-admin"})
     assert res.status_code == 200
     assert res.json()["applied"] > 0
 

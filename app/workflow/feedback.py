@@ -11,13 +11,13 @@ PDF/画像のマルチモーダル入力は gcs_tool 実装時に拡張する。
 
 import re
 import unicodedata
-from datetime import datetime
 
 from google.adk.agents import LlmAgent
 
 from app.config import get_settings
 from app.models.schemas import FeedbackOutput
 from app.tools.neo4j_tool import run_named, run_query
+from app.workflow import sanitize
 
 FEEDBACK_OUTPUT_KEY = "feedback_output"
 
@@ -79,18 +79,23 @@ def store_feedback(uid: str, feedback: FeedbackOutput) -> str:
 
     assessment_id は uid + taken_at から決定的に生成する。同じ模試を
     再度貼り付けても MERGE により Assessment は増えない (設計書 §5)。
+    LLM 出力はガードレール (sanitize) を通してから書き込む。
     """
-    taken_at = feedback.taken_at or datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    taken_at = sanitize.safe_taken_at(feedback.taken_at)
     assessment_id = f"{uid}-assess-{taken_at}"
-    per_skill = [
-        {
-            "skill_id": ps.skill_id or resolve_skill_id(ps.skill_name),
-            "score": ps.score,
-            "correct": ps.correct,
-            "total": ps.total,
-        }
-        for ps in feedback.per_skill
-    ]
+    per_skill = []
+    for ps in sanitize.cap(feedback.per_skill, sanitize.MAX_PER_SKILL, "per_skill"):
+        name = sanitize.clean_name(ps.skill_name)
+        if not name:
+            continue
+        per_skill.append(
+            {
+                "skill_id": ps.skill_id or resolve_skill_id(name),
+                "score": ps.score,
+                "correct": ps.correct,
+                "total": ps.total,
+            }
+        )
     run_named(
         "feedback.cypher",
         "merge_assessment",

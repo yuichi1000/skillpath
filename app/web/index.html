@@ -65,6 +65,13 @@
   textarea:focus { outline: 2px solid var(--ink); outline-offset: -1px; }
 
   .samples { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+  .attachRow { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; }
+  .attachBtn {
+    border: 1px dashed var(--ink); padding: 7px 12px; cursor: pointer; font-size: 12.5px;
+  }
+  .attachBtn:hover { background: var(--paper-deep); }
+  #attachName { color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; max-width: 150px; white-space: nowrap; }
+  #attachClear { padding: 4px 8px; font-size: 11px; }
   button {
     appearance: none; cursor: pointer; border-radius: 0;
     border: 1px solid var(--ink); background: var(--paper); color: var(--ink);
@@ -139,6 +146,14 @@
   .chips .up { color: var(--matsuba); }
   .chips .down { color: var(--shu); }
 
+  /* 裏どり */
+  #researchBox {
+    white-space: pre-wrap; background: #fffdf7; border: 1px solid var(--rule);
+    border-left: 3px solid var(--matsuba); padding: 16px 20px; font-size: 12.5px; line-height: 2.0;
+    word-break: break-all;
+  }
+  #researchBox a { color: var(--ink); }
+
   /* 所見 */
   #summaryBox {
     white-space: pre-wrap; background: #fffdf7; border: 1px solid var(--rule);
@@ -161,6 +176,12 @@
     <div class="paneTitle">記入欄</div>
     <div class="paneNote">資格シラバスの登録、または模試結果の報告を貼り付けてください。</div>
     <textarea id="message" placeholder="例: 「G検定を受験したい。シラバスは…」&#10;例: 「模試の結果です。CNN: 9/20…」"></textarea>
+    <div class="attachRow">
+      <label for="attach" class="attachBtn">写真・PDF を添付</label>
+      <input type="file" id="attach" accept="image/png,image/jpeg,image/webp,application/pdf" hidden>
+      <span id="attachName"></span>
+      <button id="attachClear" hidden>外す</button>
+    </div>
     <div class="samples">
       <button data-sample="syllabus">記入例: シラバス登録</button>
       <button data-sample="exam1">記入例: 模試 一回目</button>
@@ -206,6 +227,11 @@
       <div id="assessWrap"><div class="empty">まだ記録はありません。</div></div>
     </section>
 
+    <section id="researchSec" hidden>
+      <h2>裏どり <span class="cap">エージェントが検索した公式情報</span></h2>
+      <div id="researchBox"></div>
+    </section>
+
     <section>
       <h2>所見</h2>
       <div id="summaryBox" class="empty">実行すると、エージェントの所見がここに記されます。</div>
@@ -248,6 +274,24 @@ G検定 模擬試験 第3回 (2026-09-10 受験)
 };
 
 const $ = (s) => document.querySelector(s);
+let attachment = null; // {b64, mime, name}
+
+$("#attach").addEventListener("change", () => {
+  const f = $("#attach").files[0];
+  if (!f) return;
+  if (f.size > 4 * 1024 * 1024) { setStatus("添付は 4MB までです。", true); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    attachment = { b64: reader.result.split(",")[1], mime: f.type, name: f.name };
+    $("#attachName").textContent = f.name;
+    $("#attachClear").hidden = false;
+  };
+  reader.readAsDataURL(f);
+});
+$("#attachClear").addEventListener("click", () => {
+  attachment = null; $("#attach").value = "";
+  $("#attachName").textContent = ""; $("#attachClear").hidden = true;
+});
 const WEEKDAYS = ["日","月","火","水","木","金","土"];
 
 document.querySelectorAll("[data-sample]").forEach(b =>
@@ -256,8 +300,9 @@ document.querySelectorAll("[data-sample]").forEach(b =>
 // ---------- 実行 ----------
 let timerId = null;
 $("#runBtn").addEventListener("click", async () => {
-  const message = $("#message").value.trim();
+  let message = $("#message").value.trim();
   const uid = $("#uid").value.trim();
+  if (!message && attachment) message = "添付の内容を解析してください。";
   if (!message) { setStatus("記入欄が空です。", true); return; }
 
   const btns = document.querySelectorAll("button");
@@ -272,7 +317,11 @@ $("#runBtn").addEventListener("click", async () => {
     const res = await fetch("/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uid, message }),
+      body: JSON.stringify({
+        uid, message,
+        attachment_b64: attachment ? attachment.b64 : "",
+        attachment_mime: attachment ? attachment.mime : "",
+      }),
     });
     const body = await res.json();
     if (!res.ok) {
@@ -327,6 +376,13 @@ function renderRun(d) {
       `<table><thead><tr><th>日付</th><th>時刻</th><th>学習内容</th></tr></thead><tbody>${rows}</tbody></table>`;
   } else {
     $("#scheduleWrap").innerHTML = `<div class="empty">予定は作成されませんでした。</div>`;
+  }
+
+  // 裏どり (公式情報の検索メモ)
+  if (d.research_notes) {
+    $("#researchSec").hidden = false;
+    $("#researchBox").innerHTML = esc(d.research_notes)
+      .replace(/(https?:\/\/[^\s)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
   }
 
   // 所見と注意

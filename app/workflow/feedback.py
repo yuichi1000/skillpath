@@ -1,12 +1,11 @@
 """Feedback Agent (設計書 §4.2) — 模試結果の解析と Neo4j への書き込み。
 
 2段構成:
-- build_feedback_extractor(): LlmAgent が貼り付けテキストから
+- build_feedback_extractor(): LlmAgent が貼り付けテキスト・添付 (写真/スクショ/PDF) から
   分野別スコアを FeedbackOutput へ構造化抽出 (output_schema で検証)
 - store_feedback(): 決定的処理。スキル名の名寄せ、assessment_id の決定的生成、
   feedback.cypher による Assessment/ASSESSED/COMPLETED(指数移動平均) の書き込み
 
-PDF/画像のマルチモーダル入力は gcs_tool 実装時に拡張する。
 """
 
 import re
@@ -23,7 +22,8 @@ FEEDBACK_OUTPUT_KEY = "feedback_output"
 
 FEEDBACK_INSTRUCTION = """\
 あなたは学習支援システム SkillPath の模試結果解析器です。
-ユーザーが貼り付けた模試・小テストの結果から、分野別スコアを抽出して JSON で返してください。
+ユーザーが貼り付けた模試・小テストの結果 (テキスト、または添付された写真・
+スクリーンショット・PDF) から、分野別スコアを抽出して JSON で返してください。
 
 - taken_at: 実際に受験した日時 (ISO 8601)。記載が無ければ空文字。
   今後の試験予定日・目標日を taken_at にしてはいけない

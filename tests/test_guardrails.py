@@ -165,3 +165,20 @@ async def test_mass_generation_is_capped(weakness_graph):
     )
     # LLM が何個返そうと、書き込みは MAX_SKILLS 以下に制限される
     assert state["ingestion_counts"]["skills"] <= sanitize.MAX_SKILLS
+
+
+async def test_attachment_mime_whitelist():
+    async with client() as c:
+        res = await c.post("/run", json={
+            "uid": "demo-user", "message": "解析して",
+            "attachment_b64": "aGVsbG8=", "attachment_mime": "application/x-sh",
+        })
+    assert res.status_code == 422
+
+
+async def test_attachment_requires_mime():
+    async with client() as c:
+        res = await c.post("/run", json={
+            "uid": "demo-user", "message": "解析して", "attachment_b64": "aGVsbG8=",
+        })
+    assert res.status_code == 422

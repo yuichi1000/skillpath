@@ -26,6 +26,7 @@ from datetime import datetime
 
 from google.adk.events import Event
 from google.adk.workflow import START, RetryConfig, Workflow, node
+from google.genai import types
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
@@ -39,7 +40,12 @@ from app.models.schemas import (
 )
 from app.workflow import notifier as notifier_mod
 from app.workflow.feedback import build_feedback_extractor, store_feedback
-from app.workflow.ingestion import build_cert_profiler, build_cert_specialist, store_ingestion
+from app.workflow.ingestion import (
+    build_cert_profiler,
+    build_cert_researcher,
+    build_cert_specialist,
+    store_ingestion,
+)
 from app.workflow.planner import build_plan
 from app.workflow.router import build_router
 from app.workflow.scheduler import (
@@ -58,6 +64,8 @@ class WorkflowState(BaseModel):
 
     uid: str = ""
     user_input: str = ""  # ユーザー入力の原文 (intake が保存し、後段 LLM へ渡す)
+    attachment_b64: str = ""  # 添付 (模試の写真・PDF 等)。base64
+    attachment_mime: str = ""
     assessment_id: str = ""
     threshold: float = DEFAULT_THRESHOLD
     deadline: str = ""  # 目標期限 (ISO 日付)。router が入力から抽出 or 直接指定
@@ -66,6 +74,7 @@ class WorkflowState(BaseModel):
     feedback_output: FeedbackOutput | None = None
     cert_profile: CertProfile | None = None
     specialist: str = ""  # 動的生成されたスペシャリスト・エージェント名
+    research_notes: str = ""  # リサーチャーによる公式情報の裏どり (出典URL含む)
     ingestion_output: IngestionOutput | None = None
     ingestion_counts: dict = Field(default_factory=dict)
     weakness: WeaknessOutput | None = None
@@ -84,13 +93,36 @@ def intake_node(ctx, node_input: str):
     return node_input
 
 
+def _content_with_attachment(text: str, attachment_b64: str, attachment_mime: str) -> types.Content:
+    """テキスト + 添付 (画像/PDF) を1つの Content にまとめる。"""
+    import base64
+
+    parts = [types.Part(text=text)]
+    if attachment_b64 and attachment_mime:
+        parts.append(
+            types.Part(
+                inline_data=types.Blob(
+                    mime_type=attachment_mime, data=base64.b64decode(attachment_b64)
+                )
+            )
+        )
+    return types.Content(role="user", parts=parts)
+
+
 @node(name="dispatch")
-def dispatch_node(ctx, router_output: RouterOutput, user_input: str):
+def dispatch_node(
+    ctx,
+    router_output: RouterOutput,
+    user_input: str,
+    attachment_b64: str = "",
+    attachment_mime: str = "",
+):
     # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード。
-    # 出力は原文にする — 次の LLM ノード (feedback/ingestion) の入力になるため
+    # 出力は「原文 + 添付」— 次の LLM ノード (feedback/ingestion) の入力になるため
     if router_output.deadline:  # 空なら既存の設定 (state 直指定) を保持
         ctx.state["deadline"] = router_output.deadline
-    return Event(output=user_input, route=router_output.intent)
+    content = _content_with_attachment(user_input, attachment_b64, attachment_mime)
+    return Event(output=content, route=router_output.intent)
 
 
 @node(name="query_stub")
@@ -101,20 +133,39 @@ def query_node(ctx):
 
 
 @node(name="ingestion_orchestrator", rerun_on_resume=True)
-async def ingestion_orchestrator_node(ctx, user_input: str):
+async def ingestion_orchestrator_node(
+    ctx, user_input: str, attachment_b64: str = "", attachment_mime: str = ""
+):
     """資格スペシャリストの動的生成 (設計の核)。
 
-    ① Cert Profiler で登録対象の資格を特定し、② その資格専用の抽出エージェントを
-    実行時に合成して ctx.run_node で動的実行する。抽出結果は output_key 経由で
-    state に入り、後段の ingestion_store が受け取る。
+    ① Cert Profiler で登録対象の資格を特定 → ② リサーチャーが Google 検索で
+    公式シラバスを裏どり → ③ その資格専用の抽出エージェントを実行時に合成し、
+    原文 + 添付 + 調査メモを入力として動的実行する。
     """
     await ctx.run_node(build_cert_profiler(), user_input)
     profile = CertProfile.model_validate(ctx.state.get("cert_profile") or {})
+
+    research = ""
+    if profile.name:
+        researcher = build_cert_researcher(profile)
+        logger.info("リサーチャー起動: %s", researcher.name)
+        try:
+            await ctx.run_node(researcher, user_input)
+            research = str(ctx.state.get("research_notes") or "")
+        except Exception:  # noqa: BLE001 - 裏どり失敗は致命ではない
+            logger.exception("公式情報の裏どりに失敗 (続行)")
+            ctx.state["research_notes"] = "(公式情報の検索に失敗したため、貼り付け内容のみで構築)"
+
     specialist = build_cert_specialist(profile)
     ctx.state["specialist"] = specialist.name
     logger.info("動的スペシャリスト生成: %s (%s %s)", specialist.name, profile.vendor, profile.name)
-    await ctx.run_node(specialist, user_input)
-    return {"specialist": specialist.name, "cert": profile.name}
+    text = user_input
+    if research:
+        text += "\n\n[公式情報の調査メモ]\n" + research
+    await ctx.run_node(
+        specialist, _content_with_attachment(text, attachment_b64, attachment_mime)
+    )
+    return {"specialist": specialist.name, "cert": profile.name, "researched": bool(research)}
 
 
 @node(name="ingestion_store")

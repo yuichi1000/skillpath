@@ -82,16 +82,29 @@ def _validate_iso(value: str) -> str:
     return value
 
 
+ALLOWED_ATTACHMENT_MIMES = {"image/png", "image/jpeg", "image/webp", "application/pdf"}
+MAX_ATTACHMENT_B64 = 7_200_000  # base64 で約 5.4MB (バイナリ 4MB 相当)
+
+
 class RunRequest(BaseModel):
     uid: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     message: str = Field(min_length=1, max_length=8000)  # トークン浪費の上限
     deadline: str = ""  # ISO 日付。message からも抽出されるが直接指定も可
     schedule_start: str = ""  # テスト・検証用
+    attachment_b64: str = Field(default="", max_length=MAX_ATTACHMENT_B64)  # 模試の写真/PDF
+    attachment_mime: str = ""
 
     @field_validator("deadline", "schedule_start")
     @classmethod
     def _iso(cls, v: str) -> str:
         return _validate_iso(v)
+
+    @field_validator("attachment_mime")
+    @classmethod
+    def _mime(cls, v: str) -> str:
+        if v and v not in ALLOWED_ATTACHMENT_MIMES:
+            raise ValueError(f"unsupported attachment type: {v}")
+        return v
 
 
 class RunResponse(BaseModel):
@@ -104,6 +117,8 @@ class RunResponse(BaseModel):
     plan: dict | None = None
     sessions: list[dict] = []
     schedule_warnings: list[str] = []
+    research_notes: str = ""
+    specialist: str = ""
 
 
 WEB_INDEX = Path(__file__).resolve().parent / "web" / "index.html"
@@ -142,12 +157,27 @@ async def run(req: RunRequest) -> RunResponse:
     if allowed and req.uid not in allowed:
         raise HTTPException(status_code=403, detail="uid is not allowed on this deployment")
 
+    if req.attachment_b64 and not req.attachment_mime:
+        raise HTTPException(status_code=422, detail="attachment_mime is required with attachment")
+
     runner = get_runner()
     state: dict = {"uid": req.uid}
     if req.deadline:
         state["deadline"] = req.deadline
     if req.schedule_start:
         state["schedule_start"] = req.schedule_start
+    if req.attachment_b64:
+        state["attachment_b64"] = req.attachment_b64
+        state["attachment_mime"] = req.attachment_mime
+    parts = [types.Part(text=req.message)]
+    if req.attachment_b64:
+        import base64
+
+        try:
+            raw = base64.b64decode(req.attachment_b64, validate=True)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail="attachment is not valid base64") from e
+        parts.append(types.Part(inline_data=types.Blob(mime_type=req.attachment_mime, data=raw)))
     try:
         session = await runner.session_service.create_session(
             app_name=runner.app_name, user_id=req.uid, state=state
@@ -155,7 +185,7 @@ async def run(req: RunRequest) -> RunResponse:
         async for _event in runner.run_async(
             user_id=req.uid,
             session_id=session.id,
-            new_message=types.Content(role="user", parts=[types.Part(text=req.message)]),
+            new_message=types.Content(role="user", parts=parts),
         ):
             pass
         session = await runner.session_service.get_session(
@@ -184,6 +214,8 @@ async def run(req: RunRequest) -> RunResponse:
         plan=s.get("plan"),
         sessions=s.get("sessions") or [],
         schedule_warnings=s.get("schedule_warnings") or [],
+        research_notes=s.get("research_notes", ""),
+        specialist=s.get("specialist", ""),
     )
 
 

@@ -59,3 +59,20 @@ async def test_no_weakness_branch_goes_to_report(weakness_graph):
     assert state["weakness"]["has_weakness"] is False
     assert state.get("plan") is None
     assert "弱点スキルはありませんでした" in state["summary"]
+
+
+async def test_deadline_from_state_limits_schedule(weakness_graph):
+    # deadline を state 直指定 (Web UI 想定)。期限内に収まる場合は ✅ が出る
+    state = await run_workflow(
+        {
+            "uid": "test-w-user",
+            "assessment_id": "test-w-assess1",
+            "schedule_start": "2026-09-01T00:00:00",
+            "deadline": "2026-09-03",
+        }
+    )
+    sessions = state["sessions"]
+    assert sessions  # stats 40分 + ml 60分 は 9/2 夜の1スロットに収まる
+    assert all(s["end"] < "2026-09-03" for s in sessions)
+    assert "🎯 目標期限: 2026-09-03" in state["summary"]
+    assert "✅ 計画は期限内に収まっています" in state["summary"]

@@ -4,6 +4,8 @@ Cypher のロジックが本体のため、モックせずローカル Neo4j (ma
 統合テストを行う。テストデータは 'test-w-' プレフィックスで投入し、前後で削除する。
 """
 
+import time
+
 import pytest
 
 from app.tools import neo4j_tool
@@ -39,6 +41,14 @@ CREATE (a2:Assessment {id: 'test-w-assess2', source: 'test', total_score: 0.4})
 CREATE (u2)-[:TOOK]->(a2)
 CREATE (a2)-[:ASSESSED {score: 0.4, correct: 4, total: 10}]->(ml)
 """
+
+
+@pytest.fixture(autouse=True)
+def _llm_pacing(request):
+    """LLM テストの後に間隔を空け、無料枠の RPM 制限 (約10回/分) を回避する。"""
+    yield
+    if request.node.get_closest_marker("llm"):
+        time.sleep(20)
 
 
 @pytest.fixture(scope="session")

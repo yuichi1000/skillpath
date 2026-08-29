@@ -28,3 +28,23 @@ UNWIND $covers AS c
 MATCH (r:Resource {id: c.resource_id}), (s:Skill {id: c.skill_id})
 MERGE (r)-[rel:COVERS]->(s)
   ON CREATE SET rel.depth = c.depth, rel.section = c.section;
+
+// -- name: merge_resources --
+// 設計書 §4.2 の出力スキーマに resources があるが書き込みクエリが無かったため追加
+UNWIND $resources AS rs
+MERGE (r:Resource {id: rs.id})
+  ON CREATE SET r.title = rs.title,
+                r.type = rs.type,
+                r.url = rs.url,
+                r.pages = rs.pages,
+                r.estimated_hours = rs.estimated_hours,
+                r.created_at = datetime()
+  ON MATCH  SET r.estimated_hours = coalesce(rs.estimated_hours, r.estimated_hours);
+
+// -- name: unmastered_targets --
+// 登録したスキルのうち、ユーザーが未習熟のものだけを初期計画の対象にする
+MATCH (s:Skill) WHERE s.id IN $skill_ids
+OPTIONAL MATCH (u:User {uid: $uid})-[c:COMPLETED]->(s)
+WITH s, coalesce(c.mastery, 0.0) AS mastery
+WHERE mastery < $threshold
+RETURN collect(s.id) AS ids;

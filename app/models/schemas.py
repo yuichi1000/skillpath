@@ -6,7 +6,7 @@ Neo4j へ書き込む前に必ずこれらのスキーマで検証する (設計
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 Intent = Literal["register", "assessment", "query"]
 Depth = Literal["intro", "standard", "deep"]
@@ -15,39 +15,85 @@ SessionKind = Literal["initial", "review"]
 
 class RouterOutput(BaseModel):
     intent: Intent
+    deadline: str = ""  # 入力に試験日・目標日があれば ISO 日付 (YYYY-MM-DD)、無ければ空
+
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or ""
 
 
 # ---- Ingestion Agent ----
 
+# LLM 抽出の入力スキーマ群は「出力は必ず揺れる」前提で寛容に定義する:
+# null は既定値へ、未知の列挙値は安全なデフォルトへ正規化し、範囲外はクランプする。
+# 厳格に守らせるのは構造 (フィールド構成) と、名寄せに使う name/title の存在のみ。
+
+
 class SkillIn(BaseModel):
-    id: str
+    id: str = ""  # LLM には発明させず、空なら store 側で名前から名寄せ・採番する
     name: str
     description: str = ""
-    estimated_hours: float = 0.0
+    estimated_hours: float | None = None
     domain: str = ""
     aliases: list[str] = Field(default_factory=list)
 
+    @field_validator("id", "description", "domain", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or ""
+
 
 class ResourceIn(BaseModel):
-    id: str
+    id: str = ""  # 同上。store 側でタイトルから採番
     title: str
-    type: Literal["book", "paper", "doc", "course"]
+    type: str = "doc"
     url: str = ""
     pages: int | None = None
-    estimated_hours: float = 0.0
+    estimated_hours: float | None = None
+
+    @field_validator("id", "url", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or ""
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _normalize_type(cls, v):
+        v = (v or "").lower()
+        return v if v in ("book", "paper", "doc", "course") else "doc"
 
 
 class PrerequisiteIn(BaseModel):
     from_: str = Field(alias="from")
     to: str
-    strength: float = Field(ge=0.0, le=1.0)
+    strength: float = 0.5
+
+    @field_validator("strength", mode="before")
+    @classmethod
+    def _clamp(cls, v):
+        try:
+            return min(1.0, max(0.0, float(v)))
+        except (TypeError, ValueError):
+            return 0.5
 
 
 class CoversIn(BaseModel):
     resource_id: str
     skill_id: str
-    depth: Depth
+    depth: str = "standard"
     section: str = ""
+
+    @field_validator("depth", mode="before")
+    @classmethod
+    def _normalize_depth(cls, v):
+        v = (v or "").lower()
+        return v if v in ("intro", "standard", "deep") else "standard"
+
+    @field_validator("section", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or ""
 
 
 class IngestionOutput(BaseModel):
@@ -101,6 +147,7 @@ class WeaknessOutput(BaseModel):
 class PlanItem(BaseModel):
     order: int
     skill_id: str
+    name: str = ""  # 表示用スキル名 (Planner が部分グラフから設定)
     resource_id: str | None = None
     estimated_minutes: int
     section: str = ""

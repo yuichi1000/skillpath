@@ -91,6 +91,7 @@ def build_plan(uid: str, target_skill_ids: list[str]) -> PlannerOutput:
         PlanItem(
             order=i + 1,
             skill_id=sid,
+            name=by_id[sid].name,
             estimated_minutes=estimate_minutes(by_id[sid].estimated_hours, by_id[sid].mastery),
         )
         for i, sid in enumerate(ordered)

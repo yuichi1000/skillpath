@@ -1,21 +1,24 @@
 """ADK Graph Workflow 定義 (設計書 §4.1)。
 
-グラフ構成 (設計書 §4.1 のうち Ingestion 以外):
+グラフ構成:
 
-    START → router(LLM) → dispatch ─ StringRoute ┬ "assessment" → feedback_extract(LLM)
-                                                 ├ "register" → register_stub    │
-                                                 └ "query"    → query_stub       ▼
-              ┌──────────────────────────────────────── feedback_store → weakness_detector
-              └ has_weakness? ─ True  → planner → scheduler → notifier
-                              └ False → report
+    START → intake → router(LLM) → dispatch ─ StringRoute
+        ├ "assessment" → feedback_extract(LLM) → feedback_store ─┐
+        ├ "register"   → ingestion_extract(LLM) → ingestion_store ─→ planner
+        └ "query"      → query_stub                              │      │
+    feedback_store → weakness_detector ─ has_weakness? ─ True ───┘      ▼
+                                       └ False → report          scheduler → notifier
 
-Ingestion (LLM ノード) は未実装。Feedback の PDF/画像入力も未対応 (テキストのみ)。
-scheduler の空き時間は Calendar FreeBusy 接続まで placeholder_free_slots で代用。
+対象スキル集合 (設計書 §4.2「新規登録 or 弱点クラスタ」) は state の
+target_skill_ids に統一: weakness_detector が弱点クラスタを、
+ingestion_store が未習熟の新規スキルを設定し、planner はそれだけを見る。
 
 ADK の約束事:
 - ノード関数の引数は Workflow の state_schema (WorkflowState) から名前で束縛される
 - `ctx.state[...] = ...` への書き込みが共有状態として永続化される
 - 戻り値 Event の route (bool | int | str) がエッジの分岐条件とマッチングされる
+- LLM ノードは single_turn で「直前ノードの出力」しか見ない → intake が原文を
+  state に保存し、dispatch が原文を出力として後段 LLM へ渡す
 """
 
 from datetime import datetime
@@ -24,9 +27,16 @@ from google.adk.events import Event
 from google.adk.workflow import START, Workflow, node
 from pydantic import BaseModel, Field
 
-from app.models.schemas import FeedbackOutput, PlannerOutput, RouterOutput, WeaknessOutput
+from app.models.schemas import (
+    FeedbackOutput,
+    IngestionOutput,
+    PlannerOutput,
+    RouterOutput,
+    WeaknessOutput,
+)
 from app.workflow import notifier as notifier_mod
 from app.workflow.feedback import build_feedback_extractor, store_feedback
+from app.workflow.ingestion import build_ingestion_extractor, store_ingestion
 from app.workflow.planner import build_plan
 from app.workflow.router import build_router
 from app.workflow.scheduler import SessionDraft, allocate_sessions, placeholder_free_slots
@@ -37,13 +47,18 @@ class WorkflowState(BaseModel):
     """グラフ全体の共有状態。"""
 
     uid: str = ""
-    user_input: str = ""  # ユーザー入力の原文 (intake が保存し、feedback_extract 等へ渡す)
+    user_input: str = ""  # ユーザー入力の原文 (intake が保存し、後段 LLM へ渡す)
     assessment_id: str = ""
     threshold: float = DEFAULT_THRESHOLD
+    deadline: str = ""  # 目標期限 (ISO 日付)。router が入力から抽出 or 直接指定
     schedule_start: str = ""  # ISO 日時。空なら now()。テストでの固定用
     router_output: RouterOutput | None = None
     feedback_output: FeedbackOutput | None = None
+    ingestion_output: IngestionOutput | None = None
+    ingestion_counts: dict = Field(default_factory=dict)
     weakness: WeaknessOutput | None = None
+    target_skill_ids: list[str] = Field(default_factory=list)
+    plan_kind: str = "review"  # "initial" (新規登録) | "review" (復習)
     plan: PlannerOutput | None = None
     sessions: list[SessionDraft] = Field(default_factory=list)
     schedule_warnings: list[str] = Field(default_factory=list)
@@ -52,8 +67,6 @@ class WorkflowState(BaseModel):
 
 @node(name="intake")
 def intake_node(ctx, node_input: str):
-    # ADK の LLM ノードは single_turn で「直前ノードの出力」しか見ないため、
-    # 入口で原文を state に保存しておく (後段の feedback_extract が使う)
     ctx.state["user_input"] = node_input
     return node_input
 
@@ -61,15 +74,10 @@ def intake_node(ctx, node_input: str):
 @node(name="dispatch")
 def dispatch_node(ctx, router_output: RouterOutput, user_input: str):
     # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード。
-    # 出力は原文にする — 次の LLM ノード (feedback_extract) の入力になるため
+    # 出力は原文にする — 次の LLM ノード (feedback/ingestion) の入力になるため
+    if router_output.deadline:  # 空なら既存の設定 (state 直指定) を保持
+        ctx.state["deadline"] = router_output.deadline
     return Event(output=user_input, route=router_output.intent)
-
-
-@node(name="register_stub")
-def register_node(ctx):
-    msg = "教材・資格の登録 (Ingestion Agent) は未実装です。"
-    ctx.state["summary"] = msg
-    return msg
 
 
 @node(name="query_stub")
@@ -77,6 +85,17 @@ def query_node(ctx):
     msg = "質問応答 (query) は未実装です。"
     ctx.state["summary"] = msg
     return msg
+
+
+@node(name="ingestion_store")
+def ingestion_store_node(
+    ctx, uid: str, ingestion_output: IngestionOutput, threshold: float = DEFAULT_THRESHOLD
+):
+    counts, targets = store_ingestion(uid, ingestion_output, threshold)
+    ctx.state["ingestion_counts"] = counts
+    ctx.state["target_skill_ids"] = targets
+    ctx.state["plan_kind"] = "initial"
+    return {"counts": counts, "targets": targets}
 
 
 @node(name="feedback_store")
@@ -94,25 +113,32 @@ def weakness_node(ctx, assessment_id: str, uid: str, threshold: float = DEFAULT_
     # 省略可能なパラメータはここでデフォルトを持つ必要がある。
     result = detect_weakness(assessment_id, uid, threshold)
     ctx.state["weakness"] = result.model_dump()
+    ctx.state["target_skill_ids"] = result.cluster
+    ctx.state["plan_kind"] = "review"
     # route=bool が BoolRoute。True なら planner、False なら report へ
     return Event(output=result.model_dump(), route=result.has_weakness)
 
 
 @node(name="planner")
-def planner_node(ctx, uid: str, weakness: WeaknessOutput):
-    result = build_plan(uid, weakness.cluster)
+def planner_node(ctx, uid: str, target_skill_ids: list[str]):
+    result = build_plan(uid, target_skill_ids)
     ctx.state["plan"] = result.model_dump()
     return result.model_dump()
 
 
 @node(name="scheduler")
-def scheduler_node(ctx, assessment_id: str, plan: PlannerOutput, schedule_start: str = ""):
+def scheduler_node(
+    ctx, uid: str, plan: PlannerOutput, plan_kind: str,
+    schedule_start: str = "", deadline: str = "",
+):
     start = datetime.fromisoformat(schedule_start) if schedule_start else datetime.now()
     # TODO(calendar): Calendar 接続後は placeholder を calendar_tool.get_freebusy に差し替え、
     # 作成した SessionDraft を upsert_event + scheduler.cypher (LearningSession) に流す
     slots = placeholder_free_slots(start)
+    plan_key = ctx.state.get("assessment_id") or f"{uid}-{plan_kind}"
     sessions, warnings = allocate_sessions(
-        plan, slots, plan_key=assessment_id, kind="review"
+        plan, slots, plan_key=plan_key, kind=plan_kind,
+        deadline=datetime.fromisoformat(deadline) if deadline else None,
     )
     ctx.state["sessions"] = [s.model_dump(mode="json") for s in sessions]
     ctx.state["schedule_warnings"] = warnings
@@ -122,12 +148,16 @@ def scheduler_node(ctx, assessment_id: str, plan: PlannerOutput, schedule_start:
 @node(name="notifier")
 def notifier_node(
     ctx,
-    weakness: WeaknessOutput,
     plan: PlannerOutput,
     sessions: list[SessionDraft],
     schedule_warnings: list[str],
+    plan_kind: str,
+    weakness: WeaknessOutput | None = None,
+    deadline: str = "",
 ):
-    summary = notifier_mod.build_summary(weakness, plan, sessions, schedule_warnings)
+    summary = notifier_mod.build_summary(
+        plan, sessions, schedule_warnings, weakness=weakness, kind=plan_kind, deadline=deadline
+    )
     ctx.state["summary"] = summary
     return summary
 
@@ -147,6 +177,7 @@ def build_workflow(with_router: bool = True) -> Workflow:
     ]
     if with_router:
         feedback_agent = build_feedback_extractor()
+        ingestion_agent = build_ingestion_extractor()
         edges = [
             (
                 START,
@@ -155,11 +186,12 @@ def build_workflow(with_router: bool = True) -> Workflow:
                 dispatch_node,
                 {
                     "assessment": feedback_agent,
-                    "register": register_node,
+                    "register": ingestion_agent,
                     "query": query_node,
                 },
             ),
             (feedback_agent, feedback_store_node, weakness_node),
+            (ingestion_agent, ingestion_store_node, planner_node),
             *branch,
         ]
     else:

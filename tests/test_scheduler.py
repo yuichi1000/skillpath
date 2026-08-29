@@ -56,8 +56,8 @@ def test_warns_when_slots_exhausted():
     assert "nn, dl" in warnings[0]
 
 
-def test_warns_when_deadline_overrun():
-    # 期限が9/3なのに、配置がそれ以降まで伸びるケース
+def test_deadline_stops_allocation_and_gives_reverse_calc():
+    # ゴール逆算: 期限 (9/3) より後のスロットは使わず、入る分だけ配置して逆算警告を出す
     slots = [day_slot(d, 20, 22) for d in range(10)]  # 1日2時間の夜スロット
     sessions, warnings = allocate_sessions(
         plan_of(("nn", 300)),  # 90+90+90+30 の4ブロック
@@ -65,9 +65,20 @@ def test_warns_when_deadline_overrun():
         plan_key="a1",
         deadline=datetime(2026, 9, 3),
     )
-    assert len(sessions) == 4
+    # 期限前のスロットは 9/1・9/2 の2枠のみ → 90分×2 だけ配置される
+    assert len(sessions) == 2
+    assert all(s.end <= datetime(2026, 9, 3) for s in sessions)
     assert any("収まりません" in w for w in warnings)
     assert any("1日あたり" in w for w in warnings)
+
+
+def test_deadline_with_enough_slots_places_everything():
+    slots = [day_slot(d, 20, 22) for d in range(10)]
+    sessions, warnings = allocate_sessions(
+        plan_of(("nn", 120)), slots, plan_key="a1", deadline=datetime(2026, 9, 5)
+    )
+    assert len(sessions) == 2
+    assert warnings == []
 
 
 def test_session_ids_are_deterministic():

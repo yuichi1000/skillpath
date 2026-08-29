@@ -24,19 +24,22 @@ async def test_assessment_intent_is_classified(weakness_graph):
     state = await run_workflow(
         {"uid": "test-w-user"},
         with_router=True,
-        message="模試を受けたので結果を分析してください",
+        message="2026年11月15日に本試験を受けます。模試を受けたので結果を分析してください",
     )
     assert state["router_output"]["intent"] == "assessment"
-    assert state["user_input"].startswith("模試を受けた")
+    assert state["deadline"] == "2026-11-15"  # 期限が抽出され state に入る
+    assert state["user_input"].startswith("2026年")
 
 
 @pytest.mark.llm
 @needs_api_key
-async def test_register_intent_goes_to_stub(weakness_graph):
+async def test_query_intent_goes_to_stub(weakness_graph):
+    # register 経路は Ingestion 実装済みのため test_ingestion.py が担う。
+    # ここでは3つ目の経路 (query) の分類とスタブ到達を検証する
     state = await run_workflow(
-        {"uid": "test-w-user", "assessment_id": "test-w-assess1"},
+        {"uid": "test-w-user"},
         with_router=True,
-        message="G検定を受験したいので教材を登録してください",
+        message="今週の学習予定を教えて",
     )
-    assert state["router_output"]["intent"] == "register"
+    assert state["router_output"]["intent"] == "query"
     assert "未実装" in state["summary"]

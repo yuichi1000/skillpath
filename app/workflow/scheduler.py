@@ -82,6 +82,11 @@ def allocate_sessions(
         (配置済みブロック, 警告リスト)
     """
     config = config or ScheduleConfig()
+    if deadline is not None:
+        # ゴール逆算: 期限より後の空き時間は使わない (期限をまたぐスロットは切り詰める)
+        free_slots = [
+            (start, min(end, deadline)) for start, end in free_slots if start < deadline
+        ]
     blocks = _split_into_blocks(plan, config)
     warnings: list[str] = []
     sessions: list[SessionDraft] = []
@@ -122,16 +127,15 @@ def allocate_sessions(
             f" (未配置スキル: {', '.join(unplaced)})"
         )
 
-    if deadline is not None and free_slots:
-        overruns = [s for s in sessions if s.end > deadline]
-        if overruns or placed_count < len(blocks):
-            total_minutes = sum(b[1] for b in blocks)
-            days = max((deadline - free_slots[0][0]).days, 1)
-            hours_per_day = total_minutes / 60 / days
-            warnings.append(
-                f"期限 {deadline:%Y-%m-%d} に収まりません。"
-                f"完了には1日あたり約 {hours_per_day:.1f} 時間の学習が必要です"
-            )
+    if deadline is not None and placed_count < len(blocks):
+        total_minutes = sum(b[1] for b in blocks)
+        anchor = free_slots[0][0] if free_slots else None
+        days = max((deadline - anchor).days, 1) if anchor else 1
+        hours_per_day = total_minutes / 60 / days
+        warnings.append(
+            f"現在の空き時間では期限 {deadline:%Y-%m-%d} に収まりません。"
+            f"全てを終えるには1日あたり約 {hours_per_day:.1f} 時間の学習時間が必要です"
+        )
 
     return sessions, warnings
 

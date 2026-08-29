@@ -3,15 +3,11 @@
 from datetime import datetime, timedelta
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from app.main import _run_timestamps, app
+from app.main import _run_timestamps
 from app.models.schemas import PerSkillScore
 from app.workflow import sanitize
-
-
-def client() -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+from tests.helpers import client, run_workflow
 
 
 @pytest.fixture(autouse=True)
@@ -131,8 +127,6 @@ MOCK_INJECTION_TEXT = """\
 
 @pytest.mark.llm
 async def test_prompt_injection_does_not_flip_intent(weakness_graph):
-    from tests.test_graph import run_workflow
-
     state = await run_workflow(
         {"uid": "test-w-user", "schedule_start": "2026-09-01T00:00:00"},
         with_router=True,
@@ -156,8 +150,6 @@ MOCK_FLOOD_TEXT = """\
 
 @pytest.mark.llm
 async def test_mass_generation_is_capped(weakness_graph):
-    from tests.test_graph import run_workflow
-
     state = await run_workflow(
         {"uid": "test-w-user", "schedule_start": "2026-09-01T00:00:00"},
         with_router=True,

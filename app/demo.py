@@ -67,6 +67,7 @@ async def run_act(runner: InMemoryRunner, title: str, message: str) -> None:
         app_name=runner.app_name, user_id=UID, session_id=session.id
     )
     print("\n--- 結果サマリ ---")
+    # ノード進捗をライブ表示したいので、ここは runtime ヘルパを使わず直接ループする
     print(session.state.get("summary", "(summary なし)"))
 
 

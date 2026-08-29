@@ -78,7 +78,7 @@ G検定 模擬試験 第2回 (2026-08-29 受験)
 @pytest.mark.llm
 @needs_api_key
 async def test_full_flow_from_pasted_text(weakness_graph):
-    from tests.test_graph import run_workflow
+    from tests.helpers import run_workflow
 
     state = await run_workflow(
         {"uid": "test-w-user", "schedule_start": "2026-09-01T00:00:00"},

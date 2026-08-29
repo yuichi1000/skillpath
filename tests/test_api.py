@@ -1,17 +1,12 @@
 """FastAPI エンドポイントのテスト。/run は LLM を呼ぶため @llm マーク。"""
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
-from app.main import app
-
-
-async def client() -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+from tests.helpers import client
 
 
 async def test_index_serves_ui():
-    async with await client() as c:
+    async with client() as c:
         res = await c.get("/")
     assert res.status_code == 200
     assert "SkillPath" in res.text
@@ -19,7 +14,7 @@ async def test_index_serves_ui():
 
 
 async def test_health():
-    async with await client() as c:
+    async with client() as c:
         res = await c.get("/health")
     assert res.status_code == 200
     assert res.json() == {"status": "ok"}
@@ -27,7 +22,7 @@ async def test_health():
 
 async def test_init_schema(neo4j, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
-    async with await client() as c:
+    async with client() as c:
         res = await c.post("/admin/init-schema", headers={"X-Admin-Token": "test-admin"})
     assert res.status_code == 200
     assert res.json()["applied"] == 6
@@ -35,21 +30,21 @@ async def test_init_schema(neo4j, monkeypatch):
 
 async def test_seed_demo(neo4j, monkeypatch):
     monkeypatch.setenv("ADMIN_TOKEN", "test-admin")
-    async with await client() as c:
+    async with client() as c:
         res = await c.post("/admin/seed-demo", headers={"X-Admin-Token": "test-admin"})
     assert res.status_code == 200
     assert res.json()["applied"] > 0
 
 
 async def test_ingestion_task_stub():
-    async with await client() as c:
+    async with client() as c:
         res = await c.post("/tasks/ingestion")
     assert res.status_code == 202
 
 
 @pytest.mark.llm
 async def test_run_assessment_flow(weakness_graph):
-    async with await client() as c:
+    async with client() as c:
         res = await c.post(
             "/run",
             json={
@@ -66,7 +61,7 @@ async def test_run_assessment_flow(weakness_graph):
 
 
 async def test_graph_view(neo4j, weakness_graph):
-    async with await client() as c:
+    async with client() as c:
         res = await c.get("/graph", params={"uid": "test-w-user"})
     assert res.status_code == 200
     body = res.json()
@@ -83,6 +78,6 @@ async def test_graph_view(neo4j, weakness_graph):
 
 async def test_graph_view_respects_allowlist(monkeypatch, neo4j):
     monkeypatch.setenv("ALLOWED_UIDS", "demo-user")
-    async with await client() as c:
+    async with client() as c:
         res = await c.get("/graph", params={"uid": "test-w-user"})
     assert res.status_code == 403

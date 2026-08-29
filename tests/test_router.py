@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from tests.test_graph import run_workflow
+from tests.helpers import run_workflow
 
 # @needs_api_key を付けたテストは実 API を呼ぶ (make test では除外、make test-all で実行)
 needs_api_key = pytest.mark.skipif(

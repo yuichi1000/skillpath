@@ -30,6 +30,7 @@ from app.tools.init_schema import init_schema
 from app.tools.neo4j_tool import run_named
 from app.tools.seed_demo import seed
 from app.workflow.graph import build_workflow
+from app.workflow.runtime import run_workflow_session
 
 logger = logging.getLogger(__name__)
 
@@ -179,17 +180,8 @@ async def run(req: RunRequest) -> RunResponse:
             raise HTTPException(status_code=422, detail="attachment is not valid base64") from e
         parts.append(types.Part(inline_data=types.Blob(mime_type=req.attachment_mime, data=raw)))
     try:
-        session = await runner.session_service.create_session(
-            app_name=runner.app_name, user_id=req.uid, state=state
-        )
-        async for _event in runner.run_async(
-            user_id=req.uid,
-            session_id=session.id,
-            new_message=types.Content(role="user", parts=parts),
-        ):
-            pass
-        session = await runner.session_service.get_session(
-            app_name=runner.app_name, user_id=req.uid, session_id=session.id
+        s = await run_workflow_session(
+            runner, req.uid, types.Content(role="user", parts=parts), state
         )
     except HTTPException:
         raise
@@ -203,7 +195,6 @@ async def run(req: RunRequest) -> RunResponse:
             },
         ) from e
 
-    s = session.state
     return RunResponse(
         summary=s.get("summary", ""),
         intent=(s.get("router_output") or {}).get("intent", ""),

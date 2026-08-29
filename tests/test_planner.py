@@ -73,3 +73,13 @@ def test_build_plan_orders_prereq_first(weakness_graph):
     assert [p.estimated_minutes for p in out.plan] == [40, 60]
     assert out.warnings == []
     assert all(p.resource_id is None for p in out.plan)  # 教材選定 (LLM) は未実装
+
+
+def test_transitive_dependency_through_excluded_node(weakness_graph):
+    # math→stats→ml のうち stats (習熟済み想定) をクラスタから外しても、
+    # ml は math に推移的に依存していることが拾える (可変長パス修正の検証)
+    from app.workflow.planner import fetch_subgraph
+
+    nodes = {n.skill_id: n for n in fetch_subgraph("test-w-user", ["test-w-math", "test-w-ml"])}
+    assert "test-w-math" in [d["id"] for d in nodes["test-w-ml"].depends_on]
+    assert nodes["test-w-math"].depends_on == []

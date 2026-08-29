@@ -22,7 +22,12 @@ def get_driver() -> Driver:
     global _driver
     if _driver is None:
         s = get_settings()
-        _driver = GraphDatabase.driver(s.neo4j_uri, auth=(s.neo4j_user, s.neo4j_password))
+        _driver = GraphDatabase.driver(
+            s.neo4j_uri,
+            auth=(s.neo4j_user, s.neo4j_password),
+            # 「aliases プロパティが未使用」等のサーバ通知でログが埋まるのを抑制
+            notifications_min_severity="OFF",
+        )
     return _driver
 
 

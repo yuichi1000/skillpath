@@ -2,7 +2,7 @@
 // 既存スキルとの重複チェック（名前完全一致 or エイリアス一致）
 MATCH (s:Skill)
 WHERE toLower(s.name) = toLower($name)
-   OR $name IN s.aliases
+   OR $name IN coalesce(s.aliases, [])
 RETURN s.id AS id
 LIMIT 1;
 

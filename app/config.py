@@ -38,7 +38,6 @@ class Settings:
     rate_limit_per_min: int = field(
         default_factory=lambda: int(os.environ.get("RATE_LIMIT_PER_MIN", "10"))
     )
-    weakness_threshold: float = 0.6
 
 
 def get_settings() -> Settings:

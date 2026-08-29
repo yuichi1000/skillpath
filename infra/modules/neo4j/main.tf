@@ -72,10 +72,6 @@ resource "google_compute_instance" "neo4j" {
 
   # 設計書からの差分: NAT 完成前に起動すると startup script の apt が失敗するため
   depends_on = [terraform_data.nat_ready]
-
-  lifecycle {
-    ignore_changes = [metadata_startup_script] # スクリプト微修正で VM を作り直さない
-  }
 }
 
 resource "terraform_data" "nat_ready" {

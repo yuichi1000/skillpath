@@ -25,7 +25,8 @@ FEEDBACK_INSTRUCTION = """\
 あなたは学習支援システム SkillPath の模試結果解析器です。
 ユーザーが貼り付けた模試・小テストの結果から、分野別スコアを抽出して JSON で返してください。
 
-- taken_at: 受験日時 (ISO 8601)。記載が無ければ空文字
+- taken_at: 実際に受験した日時 (ISO 8601)。記載が無ければ空文字。
+  今後の試験予定日・目標日を taken_at にしてはいけない
 - source: 模試の名称。記載が無ければ空文字
 - total_score: 総合得点率 (0.0-1.0)
 - per_skill: 分野ごとに skill_name / correct (正答数) / total (問題数) /

@@ -134,3 +134,18 @@ def allocate_sessions(
             )
 
     return sessions, warnings
+
+
+def placeholder_free_slots(
+    start: datetime, days: int = 14, hour_from: int = 20, hour_to: int = 22
+) -> list[TimeSlot]:
+    """Calendar FreeBusy 接続までの仮の空き時間 (翌日から days 日間、毎晩 hour_from-hour_to)。
+
+    Calendar 接続時は、graph.py の scheduler ノードでこの呼び出しを
+    calendar_tool.get_freebusy に差し替える。
+    """
+    base = (start + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    return [
+        (day.replace(hour=hour_from), day.replace(hour=hour_to))
+        for day in (base + timedelta(days=i) for i in range(days))
+    ]

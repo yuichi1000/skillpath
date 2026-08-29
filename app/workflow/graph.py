@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models.schemas import (
+    CertProfile,
     FeedbackOutput,
     IngestionOutput,
     PlannerOutput,
@@ -38,7 +39,7 @@ from app.models.schemas import (
 )
 from app.workflow import notifier as notifier_mod
 from app.workflow.feedback import build_feedback_extractor, store_feedback
-from app.workflow.ingestion import build_ingestion_extractor, store_ingestion
+from app.workflow.ingestion import build_cert_profiler, build_cert_specialist, store_ingestion
 from app.workflow.planner import build_plan
 from app.workflow.router import build_router
 from app.workflow.scheduler import (
@@ -63,6 +64,8 @@ class WorkflowState(BaseModel):
     schedule_start: str = ""  # ISO 日時。空なら now()。テストでの固定用
     router_output: RouterOutput | None = None
     feedback_output: FeedbackOutput | None = None
+    cert_profile: CertProfile | None = None
+    specialist: str = ""  # 動的生成されたスペシャリスト・エージェント名
     ingestion_output: IngestionOutput | None = None
     ingestion_counts: dict = Field(default_factory=dict)
     weakness: WeaknessOutput | None = None
@@ -97,11 +100,32 @@ def query_node(ctx):
     return msg
 
 
+@node(name="ingestion_orchestrator", rerun_on_resume=True)
+async def ingestion_orchestrator_node(ctx, user_input: str):
+    """資格スペシャリストの動的生成 (設計の核)。
+
+    ① Cert Profiler で登録対象の資格を特定し、② その資格専用の抽出エージェントを
+    実行時に合成して ctx.run_node で動的実行する。抽出結果は output_key 経由で
+    state に入り、後段の ingestion_store が受け取る。
+    """
+    await ctx.run_node(build_cert_profiler(), user_input)
+    profile = CertProfile.model_validate(ctx.state.get("cert_profile") or {})
+    specialist = build_cert_specialist(profile)
+    ctx.state["specialist"] = specialist.name
+    logger.info("動的スペシャリスト生成: %s (%s %s)", specialist.name, profile.vendor, profile.name)
+    await ctx.run_node(specialist, user_input)
+    return {"specialist": specialist.name, "cert": profile.name}
+
+
 @node(name="ingestion_store")
 def ingestion_store_node(
-    ctx, uid: str, ingestion_output: IngestionOutput, threshold: float = DEFAULT_THRESHOLD
+    ctx,
+    uid: str,
+    ingestion_output: IngestionOutput,
+    threshold: float = DEFAULT_THRESHOLD,
+    cert_profile: CertProfile | None = None,
 ):
-    counts, targets = store_ingestion(uid, ingestion_output, threshold)
+    counts, targets = store_ingestion(uid, ingestion_output, threshold, cert=cert_profile)
     ctx.state["ingestion_counts"] = counts
     ctx.state["target_skill_ids"] = targets
     ctx.state["plan_kind"] = "initial"
@@ -242,7 +266,6 @@ def build_workflow(with_router: bool = True) -> Workflow:
         # LLM ノードは一時的な 429/5xx で即死させず、指数バックオフで最大3回試行する
         llm_retry = RetryConfig(max_attempts=3, initial_delay=2.0, backoff_factor=2.0)
         feedback_agent = node(build_feedback_extractor(), retry_config=llm_retry)
-        ingestion_agent = node(build_ingestion_extractor(), retry_config=llm_retry)
         router_agent = node(build_router(), retry_config=llm_retry)
         edges = [
             (
@@ -252,12 +275,12 @@ def build_workflow(with_router: bool = True) -> Workflow:
                 dispatch_node,
                 {
                     "assessment": feedback_agent,
-                    "register": ingestion_agent,
+                    "register": ingestion_orchestrator_node,
                     "query": query_node,
                 },
             ),
             (feedback_agent, feedback_store_node, weakness_node),
-            (ingestion_agent, ingestion_store_node, planner_node),
+            (ingestion_orchestrator_node, ingestion_store_node, planner_node),
             *branch,
         ]
     else:

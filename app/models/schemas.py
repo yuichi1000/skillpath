@@ -113,6 +113,18 @@ class IngestionOutput(BaseModel):
         return v or []
 
 
+class CertProfile(BaseModel):
+    """Cert Profiler の出力: 登録対象の資格の特定結果。"""
+
+    name: str = ""  # 例: "Professional Data Engineer"。特定できなければ空
+    vendor: str = ""  # 例: "Google Cloud"
+
+    @field_validator("name", "vendor", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or ""
+
+
 # ---- Feedback Agent ----
 
 class PerSkillScore(BaseModel):

@@ -29,7 +29,8 @@ deadline-fit verdict.
 
 ```
 User input ─▶ Router (Gemini, intent+deadline) ─▶ dispatch (deterministic route)
-   ├─ register:   Ingestion (Gemini extract) ─▶ store (entity-resolve, MERGE) ─┐
+   ├─ register:   Cert Profiler ─▶ per-exam specialist agent, synthesized at   │
+   │               runtime (ADK dynamic nodes) ─▶ store (entity-resolve, MERGE) ┤
    ├─ assessment: Feedback (Gemini extract) ─▶ store (mastery EMA) ─▶ Weakness │
    │                                            Detector (pure Cypher) ────────┤
    └─ query: stub                                                              ▼
@@ -37,6 +38,12 @@ User input ─▶ Router (Gemini, intent+deadline) ─▶ dispatch (deterministi
               Google Calendar upsert, LearningSession nodes) ─▶ Notifier
 ```
 
+- **Dynamic agent synthesis** — registering a certification spins up a
+  specialist agent for that exact exam at runtime (its name and instructions
+  are composed from the identified certification, e.g.
+  `specialist_professional_data_engineer`), executed through ADK's dynamic
+  node scheduling. The identified certification becomes a `Certification`
+  node with `REQUIRES` edges in the graph.
 - **LLM nodes and deterministic nodes are strictly separated** (ADK graph workflow).
   LLMs only classify intent and extract structure; ordering, weakness traversal,
   slot allocation and all graph writes are deterministic and unit-tested.
@@ -53,7 +60,7 @@ User input ─▶ Router (Gemini, intent+deadline) ─▶ dispatch (deterministi
 | Agent framework | Google ADK 2.8 (graph workflow, `LlmAgent` + `FunctionNode`) |
 | Graph DB | Neo4j 5 LTS on GCE (private VPC, no external IP) |
 | Runtime | Cloud Run (Direct VPC egress to Neo4j) |
-| Async / storage | Pub/Sub (+DLQ), Firestore, Cloud Storage, Secret Manager |
+| Async / storage | Pub/Sub (+DLQ), Secret Manager, Cloud Storage (Firestore provisioned per the original design, not yet used by code) |
 | External action | Google Calendar API (OAuth, token in Secret Manager) |
 | IaC | Terraform (everything in `infra/`) |
 

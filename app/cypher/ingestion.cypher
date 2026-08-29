@@ -48,3 +48,13 @@ OPTIONAL MATCH (u:User {uid: $uid})-[c:COMPLETED]->(s)
 WITH s, coalesce(c.mastery, 0.0) AS mastery
 WHERE mastery < $threshold
 RETURN collect(s.id) AS ids;
+
+// -- name: merge_certification --
+// 資格スペシャリストが特定した Certification ノードと REQUIRES エッジ (設計書 §3.1)
+MERGE (c:Certification {id: $cert_id})
+  SET c.name = $name, c.vendor = $vendor
+WITH c
+UNWIND $skill_ids AS sid
+MATCH (s:Skill {id: sid})
+MERGE (c)-[r:REQUIRES]->(s)
+  ON CREATE SET r.weight = 1.0;

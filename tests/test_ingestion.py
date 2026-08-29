@@ -72,6 +72,37 @@ def test_targets_exclude_mastered_skills(weakness_graph):
     assert targets == ["skill-test-w-ベイズ統計"]
 
 
+def test_store_creates_certification_with_requires(weakness_graph):
+    from app.models.schemas import CertProfile
+
+    out = IngestionOutput(skills=[SkillIn(name="test-w ベイズ統計")])
+    store_ingestion(
+        "test-w-user", out, threshold=0.6,
+        cert=CertProfile(name="test-w 統計検定", vendor="テスト協会"),
+    )
+    rows = run_query(
+        "MATCH (c:Certification {name: 'test-w 統計検定'})-[r:REQUIRES]->(s:Skill)"
+        " RETURN c.vendor AS vendor, r.weight AS w, s.name AS skill"
+    )
+    assert rows[0]["vendor"] == "テスト協会"
+    assert rows[0]["w"] == 1.0
+    assert rows[0]["skill"] == "test-w ベイズ統計"
+
+
+def test_specialist_agent_is_synthesized_per_cert():
+    from app.models.schemas import CertProfile
+    from app.workflow.ingestion import build_cert_specialist, specialist_name
+
+    profile = CertProfile(name="Professional Data Engineer", vendor="Google Cloud")
+    agent = build_cert_specialist(profile)
+    assert agent.name == "specialist_professional_data_engineer"
+    assert "Google Cloud Professional Data Engineer" in agent.instruction
+    # 資格を特定できない場合は汎用スペシャリストにフォールバック
+    generic = build_cert_specialist(CertProfile())
+    assert generic.name == "specialist_generic"
+    assert specialist_name(CertProfile(name="G検定")) == "specialist_g検定"
+
+
 def test_store_is_idempotent(weakness_graph):
     first = store_ingestion("test-w-user", ingestion_of(), threshold=0.6)
     second = store_ingestion("test-w-user", ingestion_of(), threshold=0.6)
@@ -109,6 +140,9 @@ async def test_full_flow_from_pasted_syllabus(weakness_graph):
         message=SYLLABUS_TEXT,
     )
     assert state["router_output"]["intent"] == "register"
+    # 資格が特定され、その資格専用スペシャリストが動的生成されている
+    assert "クラウド基礎検定" in state["cert_profile"]["name"]
+    assert state["specialist"].startswith("specialist_")
     assert len(state["ingestion_output"]["skills"]) >= 2
     assert state["plan_kind"] == "initial"
     assert len(state["target_skill_ids"]) >= 2

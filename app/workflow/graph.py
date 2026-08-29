@@ -1,11 +1,15 @@
 """ADK Graph Workflow 定義 (設計書 §4.1)。
 
-現状は LLM を使わない assessment ブランチのみをグラフ化している:
+グラフ構成 (設計書 §4.1 のうち Ingestion/Feedback 以外):
 
-    START → weakness_detector ─ has_weakness? ─ True  → planner → scheduler → notifier
-                                              └ False → report
+    START → router(LLM) → dispatch ─ StringRoute ┬ "assessment" → weakness_detector ─┐
+                                                 ├ "register" → register_stub        │
+                                                 └ "query"    → query_stub           │
+              ┌──────────────────────────────────────────────────────────────────────┘
+              └ has_weakness? ─ True  → planner → scheduler → notifier
+                              └ False → report
 
-Router / Ingestion / Feedback (LLM ノード) は Gemini API キー設定後に追加する。
+Ingestion / Feedback (LLM ノード) は未実装。
 scheduler の空き時間は Calendar FreeBusy 接続まで placeholder_free_slots で代用。
 
 ADK の約束事:
@@ -20,8 +24,9 @@ from google.adk.events import Event
 from google.adk.workflow import START, Workflow, node
 from pydantic import BaseModel, Field
 
-from app.models.schemas import PlannerOutput, WeaknessOutput
+from app.models.schemas import PlannerOutput, RouterOutput, WeaknessOutput
 from app.workflow import notifier as notifier_mod
+from app.workflow.router import build_router
 from app.workflow.planner import build_plan
 from app.workflow.scheduler import SessionDraft, allocate_sessions, placeholder_free_slots
 from app.workflow.weakness import DEFAULT_THRESHOLD, detect_weakness
@@ -34,11 +39,32 @@ class WorkflowState(BaseModel):
     assessment_id: str = ""
     threshold: float = DEFAULT_THRESHOLD
     schedule_start: str = ""  # ISO 日時。空なら now()。テストでの固定用
+    router_output: RouterOutput | None = None
     weakness: WeaknessOutput | None = None
     plan: PlannerOutput | None = None
     sessions: list[SessionDraft] = Field(default_factory=list)
     schedule_warnings: list[str] = Field(default_factory=list)
     summary: str = ""
+
+
+@node(name="dispatch")
+def dispatch_node(ctx, router_output: RouterOutput):
+    # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード
+    return Event(output=router_output.model_dump(), route=router_output.intent)
+
+
+@node(name="register_stub")
+def register_node(ctx):
+    msg = "教材・資格の登録 (Ingestion Agent) は未実装です。"
+    ctx.state["summary"] = msg
+    return msg
+
+
+@node(name="query_stub")
+def query_node(ctx):
+    msg = "質問応答 (query) は未実装です。"
+    ctx.state["summary"] = msg
+    return msg
 
 
 @node(name="weakness_detector")
@@ -93,12 +119,26 @@ def report_node(ctx, weakness: WeaknessOutput):
     return summary
 
 
-def build_workflow() -> Workflow:
-    return Workflow(
-        name="skillpath",
-        state_schema=WorkflowState,
-        edges=[
-            (START, weakness_node, {True: planner_node, False: report_node}),
-            (planner_node, scheduler_node, notifier_node),
-        ],
-    )
+def build_workflow(with_router: bool = True) -> Workflow:
+    """with_router=False は LLM を呼ばない決定的テスト用 (assessment ブランチ直行)。"""
+    branch = [
+        (weakness_node, {True: planner_node, False: report_node}),
+        (planner_node, scheduler_node, notifier_node),
+    ]
+    if with_router:
+        edges = [
+            (
+                START,
+                build_router(),
+                dispatch_node,
+                {
+                    "assessment": weakness_node,
+                    "register": register_node,
+                    "query": query_node,
+                },
+            ),
+            *branch,
+        ]
+    else:
+        edges = [(START, weakness_node), *branch]
+    return Workflow(name="skillpath", state_schema=WorkflowState, edges=edges)

@@ -6,9 +6,9 @@ from google.genai import types
 from app.workflow.graph import build_workflow
 
 
-async def run_workflow(initial_state: dict) -> dict:
+async def run_workflow(initial_state: dict, *, with_router: bool = False, message: str = "模試結果を分析して") -> dict:
     """ワークフローを1回実行し、実行後のセッション状態を返す。"""
-    runner = InMemoryRunner(node=build_workflow())
+    runner = InMemoryRunner(node=build_workflow(with_router=with_router))
     uid = initial_state["uid"]
     session = await runner.session_service.create_session(
         app_name=runner.app_name, user_id=uid, state=initial_state
@@ -16,7 +16,7 @@ async def run_workflow(initial_state: dict) -> dict:
     async for _event in runner.run_async(
         user_id=uid,
         session_id=session.id,
-        new_message=types.Content(role="user", parts=[types.Part(text="模試結果を分析して")]),
+        new_message=types.Content(role="user", parts=[types.Part(text=message)]),
     ):
         pass
     session = await runner.session_service.get_session(

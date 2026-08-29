@@ -2,12 +2,12 @@
 
 資格スペシャリストの動的生成:
 - build_cert_profiler(): 軽量 LLM が登録対象の資格を特定 ({name, vendor})
+- build_cert_researcher(): Google 検索グラウンディングで公式シラバスを裏どり
 - build_cert_specialist(profile): その資格専用の抽出エージェントを実行時に合成
   (エージェント名・instruction とも資格情報から動的生成)
 - store_ingestion(): 決定的処理。名寄せ・サニタイズ・MERGE 書き込み。
   資格が特定できた場合は Certification ノードと REQUIRES エッジも作成 (設計書 §3.1)
 
-Web 検索・URL 取得・PDF 入力 (gcs_read) は後続フェーズで拡張する。
 """
 
 import re
@@ -17,9 +17,9 @@ from google.adk.tools import google_search
 
 from app.config import get_settings
 from app.models.schemas import CertProfile, IngestionOutput
-from app.tools.neo4j_tool import run_named, run_query
+from app.tools.neo4j_tool import run_named
 from app.workflow import sanitize
-from app.workflow.feedback import _slug, resolve_skill_id
+from app.workflow.entity import ensure_user, resolve_skill_id, slugify
 
 INGESTION_OUTPUT_KEY = "ingestion_output"
 CERT_PROFILE_KEY = "cert_profile"
@@ -133,7 +133,7 @@ def store_ingestion(
     LLM 出力はガードレール (sanitize) で量・長さを制限してから書き込む。
     cert が特定されていれば Certification ノードと REQUIRES を作成 (設計書 §3.1)。
     """
-    run_query("MERGE (u:User {uid: $uid})", uid=uid)
+    ensure_user(uid)
 
     # 名寄せ: 仮ID (name / title) → 実ID のマップ
     skill_ids: dict[str, str] = {}
@@ -154,7 +154,7 @@ def store_ingestion(
         title = sanitize.clean_name(rs.title)
         if not title:
             continue
-        real_id = rs.id or f"res-{_slug(title)}"
+        real_id = rs.id or f"res-{slugify(title)}"
         resource_ids[rs.id or rs.title] = real_id
         resource_ids[rs.title] = real_id
         resources.append({**rs.model_dump(), "id": real_id, "title": title})
@@ -188,7 +188,7 @@ def store_ingestion(
         run_named(
             "ingestion.cypher",
             "merge_certification",
-            cert_id=f"cert-{_slug(cert_name)}",
+            cert_id=f"cert-{slugify(cert_name)}",
             name=cert_name,
             vendor=sanitize.clean_name(cert.vendor),
             skill_ids=[s["id"] for s in skills],

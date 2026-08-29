@@ -8,15 +8,13 @@
 
 """
 
-import re
-import unicodedata
-
 from google.adk.agents import LlmAgent
 
 from app.config import get_settings
 from app.models.schemas import FeedbackOutput
-from app.tools.neo4j_tool import run_named, run_query
+from app.tools.neo4j_tool import run_named
 from app.workflow import sanitize
+from app.workflow.entity import resolve_skill_id
 
 FEEDBACK_OUTPUT_KEY = "feedback_output"
 
@@ -49,29 +47,6 @@ def build_feedback_extractor() -> LlmAgent:
         output_schema=FeedbackOutput,
         output_key=FEEDBACK_OUTPUT_KEY,
     )
-
-
-def _slug(name: str) -> str:
-    s = unicodedata.normalize("NFKC", name).strip().lower()
-    return re.sub(r"[^0-9a-zA-Zぁ-んァ-ン一-龥ー]+", "-", s).strip("-")
-
-
-def resolve_skill_id(name: str) -> str:
-    """スキル名を既存 Skill に名寄せし、無ければ新規作成して id を返す (設計書 §4.2)。
-
-    新規作成されたスキルは前提関係が空のノードとして Planner に扱われる。
-    """
-    rows = run_named("ingestion.cypher", "dedupe_skill", name=name)
-    if rows:
-        return rows[0]["id"]
-    skill_id = f"skill-{_slug(name)}"
-    run_query(
-        "MERGE (s:Skill {id: $id})"
-        " ON CREATE SET s.name = $name, s.created_at = datetime()",
-        id=skill_id,
-        name=name,
-    )
-    return skill_id
 
 
 def store_feedback(uid: str, feedback: FeedbackOutput) -> str:

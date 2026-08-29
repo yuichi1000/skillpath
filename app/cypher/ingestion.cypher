@@ -58,3 +58,11 @@ UNWIND $skill_ids AS sid
 MATCH (s:Skill {id: sid})
 MERGE (c)-[r:REQUIRES]->(s)
   ON CREATE SET r.weight = 1.0;
+
+// -- name: ensure_user --
+MERGE (u:User {uid: $uid});
+
+// -- name: create_skill_if_absent --
+// 名寄せでヒットしなかったスキル名の新規作成 (entity.resolve_skill_id が使用)
+MERGE (s:Skill {id: $id})
+  ON CREATE SET s.name = $name, s.created_at = datetime();

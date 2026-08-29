@@ -3,6 +3,11 @@
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# ローカル開発用: カレントディレクトリの .env を読み込む (既存の環境変数が優先)
+load_dotenv()
+
 
 @dataclass(frozen=True)
 class Settings:

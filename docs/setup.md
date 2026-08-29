@@ -37,8 +37,7 @@ docker compose ps # STATUS が running になっていること
 ## Step 3: スキーマ適用
 
 ```bash
-cp .env.example .env          # 初回のみ
-set -a; source .env; set +a   # .env を環境変数に読み込む
+cp .env.example .env   # 初回のみ (.env はアプリ起動時に自動読み込みされる)
 make schema                   # app/cypher/schema.cypher の制約・インデックスを適用
 ```
 
@@ -58,4 +57,4 @@ make schema                   # app/cypher/schema.cypher の制約・インデ�
 
 - **Bolt 接続エラー (`Connection refused`)**: Neo4j の起動完了前の可能性。`docker compose logs neo4j` で `Started.` が出ているか確認
 - **認証エラー**: `.env` の `NEO4J_PASSWORD` と docker-compose.yml の `NEO4J_AUTH` が一致しているか確認（既定はどちらも `localdevpassword`）
-- **環境変数が効かない**: `source .env` はシェルごとに必要。新しいターミナルを開いたら再実行する
+- **環境変数が効かない**: `.env` は `app/config.py` が自動読み込みする。シェルで直接使いたい場合のみ `set -a; source .env; set +a` を実行する

@@ -33,7 +33,7 @@ async def test_weakness_branch_runs_planner_and_notifier(weakness_graph):
     assert [p["skill_id"] for p in state["plan"]["plan"]] == ["test-w-stats", "test-w-ml"]
     # notifier のサマリが生成されている
     assert "弱点クラスタ" in state["summary"]
-    assert "test-w-stats" in state["summary"]
+    assert "test 確率統計" in state["summary"]  # 計画はスキル名で表示される
 
 
 async def test_no_weakness_branch_goes_to_report(weakness_graph):

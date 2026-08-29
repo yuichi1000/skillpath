@@ -1,16 +1,18 @@
 // -- name: dependency_subgraph --
-// 対象スキル群の依存部分グラフを取得
+// 設計書 §4.2 から1点変更: 循環解消に strength が必要なため、前提を id だけでなく
+// {id, strength} のマップで返す (設計書のクエリは pre.id のみを collect していた)
 MATCH (s:Skill)
 WHERE s.id IN $target_skill_ids
-OPTIONAL MATCH (s)<-[:PREREQUISITE_OF]-(pre:Skill)
+OPTIONAL MATCH (pre:Skill)-[p:PREREQUISITE_OF]->(s)
 WHERE pre.id IN $target_skill_ids
-WITH s, collect(pre.id) AS deps
+WITH s, collect(CASE WHEN pre IS NOT NULL
+                THEN {id: pre.id, strength: coalesce(p.strength, 1.0)} END) AS deps
 OPTIONAL MATCH (u:User {uid: $uid})-[c:COMPLETED]->(s)
-RETURN s.id              AS skill_id,
-       s.name            AS name,
-       s.estimated_hours AS estimated_hours,
-       deps              AS depends_on,
-       coalesce(c.mastery, 0.0) AS mastery;
+RETURN s.id                              AS skill_id,
+       s.name                            AS name,
+       coalesce(s.estimated_hours, 1.0)  AS estimated_hours,
+       deps                              AS depends_on,
+       coalesce(c.mastery, 0.0)          AS mastery;
 
 // -- name: resource_candidates --
 MATCH (r:Resource)-[c:COVERS]->(s:Skill)

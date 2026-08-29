@@ -13,3 +13,8 @@ variable "workflow_url" {
 variable "pubsub_invoker_sa_email" {
   type = string
 }
+
+variable "enable_push" {
+  type    = bool
+  default = false
+}

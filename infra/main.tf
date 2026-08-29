@@ -73,6 +73,7 @@ module "data" {
   project_id              = var.project_id
   region                  = var.region
   workflow_url            = var.container_image != "" ? module.cloudrun[0].url : ""
+  enable_push             = var.container_image != ""
   pubsub_invoker_sa_email = module.iam.pubsub_invoker_sa_email
 }
 

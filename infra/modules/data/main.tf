@@ -30,9 +30,11 @@ resource "google_pubsub_topic" "ingestion_dlq" {
   name = "skillpath-ingestion-dlq"
 }
 
-# 設計書からの差分: Cloud Run 未作成の phase1 では push 先が無いため条件付き
+# 設計書からの差分: Cloud Run 未作成の phase1 では push 先が無いため条件付き。
+# count は plan 時に確定する必要があるため、URL ではなく enable_push (イメージ指定の
+# 有無から root が算出) で判定する
 resource "google_pubsub_subscription" "ingestion_push" {
-  count = var.workflow_url != "" ? 1 : 0
+  count = var.enable_push ? 1 : 0
 
   name  = "skillpath-ingestion-push"
   topic = google_pubsub_topic.ingestion.id

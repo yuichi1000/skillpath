@@ -4,6 +4,7 @@
 Neo4j へ書き込む前に必ずこれらのスキーマで検証する (設計書 §6)。
 """
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -197,6 +198,20 @@ class PlannerOutput(BaseModel):
 
 
 # ---- Scheduler Agent ----
+
+class SessionDraft(BaseModel):
+    """カレンダー登録前の学習ブロック案 (Scheduler の出力単位)。
+
+    session_id は Calendar の extendedProperties (skillpath_session_id) と
+    Neo4j の LearningSession.id になる冪等性の鍵。同じ入力からは常に同じ id。
+    """
+
+    session_id: str
+    skill_id: str
+    start: datetime
+    end: datetime
+    kind: SessionKind
+
 
 class CreatedEvent(BaseModel):
     event_id: str

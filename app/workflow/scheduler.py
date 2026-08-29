@@ -9,12 +9,15 @@ LearningSession の Neo4j 書き込みは calendar_tool 実装後に接続する
 貪欲法では、後のスキルが先の時刻に置かれることが構造的に起き得ないため。
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel
+from app.config import get_settings
+from app.models.schemas import PlannerOutput, SessionDraft, SessionKind, WeaknessOutput
+from app.tools.neo4j_tool import run_named
 
-from app.models.schemas import PlannerOutput, SessionKind
+logger = logging.getLogger(__name__)
 
 TimeSlot = tuple[datetime, datetime]
 
@@ -25,21 +28,6 @@ class ScheduleConfig:
 
     max_block_minutes: int = 90
     min_block_minutes: int = 30
-
-
-class SessionDraft(BaseModel):
-    """カレンダー登録前の学習ブロック案。
-
-    session_id はここで確定し、Calendar の extendedProperties
-    (skillpath_session_id) と Neo4j の LearningSession.id になる冪等性の鍵。
-    同じ入力からは常に同じ id が生成される。
-    """
-
-    session_id: str
-    skill_id: str
-    start: datetime
-    end: datetime
-    kind: SessionKind
 
 
 def _split_into_blocks(
@@ -146,7 +134,7 @@ def placeholder_free_slots(
     """Calendar FreeBusy 接続までの仮の空き時間 (翌日から days 日間、毎晩 hour_from-hour_to)。
 
     Calendar 接続時は、graph.py の scheduler ノードでこの呼び出しを
-    calendar_tool.get_freebusy に差し替える。
+    calendar_tool.get_busy に差し替える。
     """
     base = (start + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return [
@@ -181,3 +169,65 @@ def compute_free_slots(
         if cursor < window_end:
             free.append((cursor, window_end))
     return free
+
+
+def schedule_sessions(
+    uid: str,
+    plan: PlannerOutput,
+    kind: SessionKind,
+    start: datetime,
+    plan_key: str,
+    deadline: datetime | None = None,
+    weakness: WeaknessOutput | None = None,
+) -> tuple[list[SessionDraft], list[str], bool]:
+    """空き時間の取得 → 割り当て → カレンダー登録 → LearningSession 記録までの一連。
+
+    CALENDAR_ENABLED のときは実カレンダーを使い、失敗時はプレースホルダに
+    フォールバック (ワークフローを止めない)。戻り値は (配置, 警告, カレンダー同期済みか)。
+    """
+    from app.tools import calendar_tool
+    from app.workflow import notifier
+
+    calendar_ok = False
+    warnings_extra: list[str] = []
+    if get_settings().calendar_enabled:
+        try:
+            busy = calendar_tool.get_busy(start, start + timedelta(days=15))
+            slots = compute_free_slots(start, busy)
+            calendar_ok = True
+        except calendar_tool.CalendarUnavailable as e:
+            logger.warning("Calendar 未接続のためプレースホルダで続行: %s", e)
+            warnings_extra.append("カレンダー未接続のため仮の空き時間で計画しています")
+            slots = placeholder_free_slots(start)
+    else:
+        slots = placeholder_free_slots(start)
+
+    sessions, warnings = allocate_sessions(
+        plan, slots, plan_key=plan_key, kind=kind, deadline=deadline
+    )
+
+    if calendar_ok and sessions:
+        # イベント作成 → LearningSession を Neo4j に記録 (設計書 §4.2 step 6 / §5 冪等)
+        names = {item.skill_id: item.name or item.skill_id for item in plan.plan}
+        session_rows = []
+        for s in sessions:
+            summary, description = notifier.build_event_texts(s.skill_id, names, kind, weakness)
+            event_id = calendar_tool.upsert_event(
+                s.session_id, summary, description, s.start, s.end
+            )
+            session_rows.append(
+                {
+                    "id": s.session_id,
+                    "skill_id": s.skill_id,
+                    "start": s.start.isoformat(),
+                    "duration_min": int((s.end - s.start).total_seconds() // 60),
+                    "event_id": event_id,
+                    "kind": s.kind,
+                    "resource_id": None,
+                    "from_page": None,
+                    "to_page": None,
+                }
+            )
+        run_named("scheduler.cypher", "create_sessions", uid=uid, sessions=session_rows)
+
+    return sessions, warnings + warnings_extra, calendar_ok

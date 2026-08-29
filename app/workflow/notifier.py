@@ -4,8 +4,7 @@ register (初期計画) / assessment (復習計画) の両経路で使う。
 スキル名は PlanItem.name から引く (Planner が部分グラフから設定済み)。
 """
 
-from app.models.schemas import PlannerOutput, WeaknessOutput
-from app.workflow.scheduler import SessionDraft
+from app.models.schemas import PlannerOutput, SessionDraft, WeaknessOutput
 
 _WEEKDAYS_JP = "月火水木金土日"
 

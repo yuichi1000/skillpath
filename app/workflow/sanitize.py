@@ -39,9 +39,10 @@ def safe_taken_at(raw: str | None, now: datetime | None = None) -> str:
     """taken_at を検証する。パース不能・未来日は実行時刻に置換。
 
     「試験は11月15日」のような予定日を LLM が受験日として返す事象への決定的対策。
+    フォールバックは日付精度 (同日の再実行が同じ assessment に MERGE されるように)。
     """
     now = now or datetime.now()
-    fallback = now.strftime("%Y-%m-%dT%H:%M:%S")
+    fallback = now.strftime("%Y-%m-%d")
     if not raw:
         return fallback
     try:

@@ -37,11 +37,11 @@ def test_cap_limits_list_size():
 
 def test_safe_taken_at_replaces_future_and_garbage():
     now = datetime(2026, 8, 30, 12, 0, 0)
-    # 未来日 (試験予定日の混入) → 実行時刻
-    assert sanitize.safe_taken_at("2026-11-15", now=now) == "2026-08-30T12:00:00"
-    # パース不能 → 実行時刻
-    assert sanitize.safe_taken_at("来週の火曜", now=now) == "2026-08-30T12:00:00"
-    assert sanitize.safe_taken_at("", now=now) == "2026-08-30T12:00:00"
+    # 未来日 (試験予定日の混入) → 実行日 (日付精度: 同日再実行が同じ assessment になる)
+    assert sanitize.safe_taken_at("2026-11-15", now=now) == "2026-08-30"
+    # パース不能 → 実行日
+    assert sanitize.safe_taken_at("来週の火曜", now=now) == "2026-08-30"
+    assert sanitize.safe_taken_at("", now=now) == "2026-08-30"
     # 過去日はそのまま
     assert sanitize.safe_taken_at("2026-08-25T10:00:00", now=now) == "2026-08-25T10:00:00"
 

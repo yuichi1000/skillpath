@@ -67,18 +67,45 @@ def _to_rfc3339(dt: datetime) -> str:
 def get_busy(
     time_min: datetime, time_max: datetime, calendar_id: str = "primary"
 ) -> list[tuple[datetime, datetime]]:
-    """FreeBusy API で busy 区間を取得し、ローカル時刻の naive datetime で返す。"""
-    body = {
-        "timeMin": _to_rfc3339(time_min),
-        "timeMax": _to_rfc3339(time_max),
-        "items": [{"id": calendar_id}],
-    }
-    result = get_service().freebusy().query(body=body).execute()
-    busy = []
-    for interval in result["calendars"][calendar_id].get("busy", []):
-        start = datetime.fromisoformat(interval["start"]).astimezone(_tz()).replace(tzinfo=None)
-        end = datetime.fromisoformat(interval["end"]).astimezone(_tz()).replace(tzinfo=None)
-        busy.append((start, end))
+    """busy 区間をローカル時刻の naive datetime で返す。
+
+    FreeBusy API ではなく events.list を使う: FreeBusy は SkillPath 自身が作った
+    学習ブロックも busy として返すため、再計画時に自分のイベントで空き枠が
+    埋まってしまう (自己衝突)。skillpath_session_id 付きイベントは除外する。
+    終日イベント (date のみ) と「予定なし」扱い (transparent) も busy にしない。
+    """
+    service = get_service()
+    busy: list[tuple[datetime, datetime]] = []
+    page_token = None
+    while True:
+        resp = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=_to_rfc3339(time_min),
+                timeMax=_to_rfc3339(time_max),
+                singleEvents=True,
+                maxResults=250,
+                pageToken=page_token,
+            )
+            .execute()
+        )
+        for ev in resp.get("items", []):
+            props = (ev.get("extendedProperties") or {}).get("private") or {}
+            if SESSION_ID_PROP in props:
+                continue  # 自分のイベントは再配置可能なので busy にしない
+            if ev.get("status") == "cancelled" or ev.get("transparency") == "transparent":
+                continue
+            start_raw = (ev.get("start") or {}).get("dateTime")
+            end_raw = (ev.get("end") or {}).get("dateTime")
+            if not start_raw or not end_raw:
+                continue  # 終日イベントは学習ウィンドウを塞がない扱い
+            start = datetime.fromisoformat(start_raw).astimezone(_tz()).replace(tzinfo=None)
+            end = datetime.fromisoformat(end_raw).astimezone(_tz()).replace(tzinfo=None)
+            busy.append((start, end))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
     return busy
 
 

@@ -210,7 +210,7 @@
   <div id="inputPane">
     <div class="paneTitle">記入欄</div>
     <div class="paneNote">資格シラバスの登録、または模試結果の報告を貼り付けてください。</div>
-    <textarea id="message" placeholder="例: 「G検定を受験したい。シラバスは…」&#10;例: 「模試の結果です。CNN: 9/20…」"></textarea>
+    <textarea id="message" placeholder="例: 「〇〇を受験します。試験日は2026年11月20日です」&#10;例: 「模試の結果です。ロード バランシング 1/3…」"></textarea>
     <div class="attachRow">
       <label for="attach" class="attachBtn">写真・PDF を添付</label>
       <input type="file" id="attach" accept="image/png,image/jpeg,image/webp,application/pdf" hidden>
@@ -218,7 +218,7 @@
       <button id="attachClear" hidden>外す</button>
     </div>
     <div class="samples">
-      <button data-sample="syllabus">記入例: シラバス登録</button>
+      <button data-sample="syllabus">記入例: 資格の登録</button>
       <button data-sample="exam1">記入例: 模試 一回目</button>
       <button data-sample="exam2">記入例: 模試 二回目(改善)</button>
     </div>
@@ -284,35 +284,33 @@
 
 <script>
 const SAMPLES = {
-  syllabus: `JDLA E資格 を受験したいので登録してください。
-シラバス抜粋:
-1. 応用数学
-  - 情報理論 (学習目安 4時間)
-  - ベイズ則 (学習目安 4時間)
-2. 深層学習の実装
-  - 最適化手法 SGD/Adam (学習目安 6時間)
-  - 正則化 ドロップアウト/バッチ正規化 (学習目安 5時間)
-※「最適化手法 SGD/Adam」と「正則化 ドロップアウト/バッチ正規化」の理解には
-  「情報理論」「ベイズ則」の内容が前提となる。
-教材: 「ゼロから作るDeep Learning(デモ)」の4-6章が最適化手法と正則化をカバーする。`,
-  exam1: `模試の結果を報告します。本試験は 2026年11月15日 です。復習計画をお願いします。
-G検定 模擬試験 第2回 (2026-08-29 受験)
-総合: 62/100
+  syllabus: `Google Cloud Professional Cloud Network Engineer を受験します。
+試験日は 2026年11月20日 です。
+出題範囲は公式試験ガイドを調べて設定してください。`,
+  exam1: `模試の結果を報告します。復習計画をお願いします。
+Professional Cloud Network Engineer 模擬試験 (2026-08-28 受験)
+総合: 32/50
 分野別:
-- 機械学習基礎: 8/10
-- ディープラーニング手法: 12/20
-- CNN(画像認識): 9/20
-- 自然言語処理: 10/20
-- AI倫理・法律: 9/10`,
+- VPC 設計・IP 管理: 4/4
+- ハイブリッド接続 (Cloud VPN・Cloud Interconnect): 5/7
+- Cloud Router・BGP: 1/4
+- ロード バランシング: 1/3
+- ネットワーク セキュリティ (Cloud Armor): 0/2
+- ネットワーク運用 (Cloud NAT・Secure Web Proxy・Packet Mirroring): 4/6
+- Cloud DNS: 4/4
+- GKE ネットワーキング: 3/5`,
   exam2: `模試の結果を報告します。前回の復習を終えたので再計画をお願いします。
-G検定 模擬試験 第3回 (2026-09-10 受験)
-総合: 81/100
+Professional Cloud Network Engineer 模擬試験 (2026-09-20 受験)
+総合: 43/50
 分野別:
-- 機械学習基礎: 9/10
-- ディープラーニング手法: 16/20
-- CNN(画像認識): 15/20
-- 自然言語処理: 14/20
-- AI倫理・法律: 9/10`,
+- VPC 設計・IP 管理: 4/4
+- ハイブリッド接続 (Cloud VPN・Cloud Interconnect): 6/7
+- Cloud Router・BGP: 3/4
+- ロード バランシング: 2/3
+- ネットワーク セキュリティ (Cloud Armor): 2/2
+- ネットワーク運用 (Cloud NAT・Secure Web Proxy・Packet Mirroring): 5/6
+- Cloud DNS: 4/4
+- GKE ネットワーキング: 4/5`,
 };
 
 const $ = (s) => document.querySelector(s);

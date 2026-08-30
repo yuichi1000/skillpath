@@ -42,7 +42,7 @@ async def test_query_intent_goes_to_stub(weakness_graph):
         message="今週の学習予定を教えて",
     )
     assert state["router_output"]["intent"] == "query"
-    assert "未実装" in state["summary"]
+    assert "登録も採点も行いませんでした" in state["summary"]
 
 
 def test_output_schemas_have_no_empty_enum_values():

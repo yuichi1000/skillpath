@@ -40,7 +40,7 @@ the scheduler fits them into your genuinely free evenings, earliest-deadline-fir
 Open **https://skillpath-workflow-924686405565.asia-northeast1.run.app** — the study ledger
 loads with a seeded demo learner. Three sample inputs are one click away in the left pane.
 
-1. **Register** — click *記入例: シラバス登録*, then **実行**. Watch the knowledge graph
+1. **Register** — click *記入例: 資格の登録*, then **実行**. Watch the knowledge graph
    appear and a new certification tab arrive in the header.
 2. **First mock exam** — click *記入例: 模試 一回目*, then **実行**. Weak skills turn red,
    their unmastered prerequisites turn amber, and a review timetable appears.
@@ -98,6 +98,14 @@ The graph is the product, not a cache. `PREREQUISITE_OF` is what a chat interfac
 replicate: it is what turns "you got CNN wrong" into "your linear algebra is the problem, and
 here are four evenings to fix it."
 
+None of that works if a score cannot find its skill, and in practice a syllabus and a result
+sheet never spell things the same way. Names are matched on a key with every separator removed,
+then by containment when one name qualifies the other, then through alternate spellings the
+specialist supplied and the parts a name enumerates. A reported domain coarser than the
+syllabus — one line covering Cloud NAT, Secure Web Proxy and Packet Mirroring — is split and
+scored against each skill it names. Question counts that ride along in a domain label
+(`Cloud DNS (4問)`) are stripped before any of this.
+
 ### Coordinating several exams
 
 Study time is one resource. When you pursue two certifications, the scheduler re-plans **all**
@@ -132,12 +140,13 @@ effect — the same layer the architecture is built around.
 | | |
 |---|---|
 | **Structure** | Extractor output must satisfy typed Pydantic schemas before any write. Nulls, unknown enum values and out-of-range numbers are coerced; only the structure and the entity-resolution keys are strict, so a slightly wrong model does not fail the run. |
-| **Volume** | Per request: ≤50 skills, ≤20 resources, ≤100 edges, ≤30 scores. Names are stripped of control characters and truncated. A "generate 1000 skills" injection cannot flood the graph. |
+| **Volume** | Per request: ≤80 skills, ≤20 resources, ≤100 edges, ≤30 scores. Names are stripped of control characters and truncated. A "generate 1000 skills" injection cannot flood the graph. |
 | **Time** | A future exam date can never become an assessment timestamp — the deterministic `safe_taken_at` guard, added after the prompt-only fix proved insufficient. |
 | **Access** | `/admin/*` requires `X-Admin-Token` and is closed by default. `/run` validates uid format, caps the message at 8k characters, enforces an `ALLOWED_UIDS` allowlist, and rate-limits per minute. Attachments are restricted to PNG/JPEG/WebP/PDF and about 5 MB. |
 | **Failure** | LLM nodes retry transient errors with exponential backoff; a calendar outage degrades to placeholder slots with a warning rather than failing the workflow; LLM errors surface as a structured 502, never a stack trace. |
 | **Isolation** | Every user-scoped Cypher query filters by `uid`. Neo4j has no public IP; Cloud Run reaches it over direct VPC egress. |
-| **Proof** | `pytest -m llm` runs prompt-injection and mass-generation attacks against the live model and asserts they fail. |
+| **Scope** | A request that is not about studying for an exam, or one the app should not help with — obtaining leaked exam content, attacking someone, harvesting another person's data — is declined at the router and reaches a terminal node that touches neither the database nor the calendar. The judgement is deliberately placed where being wrong can only refuse. |
+| **Proof** | `pytest -m llm` runs prompt-injection, mass-generation, off-topic and leaked-exam-material attacks against the live model and asserts they fail. |
 
 Pasted text — syllabi, papers, exam results — is data, never instruction. Every prompt says
 so, and every cap enforces it regardless.
@@ -201,8 +210,8 @@ CALENDAR_ENABLED=true uv run python -m app.demo
 ### Tests
 
 ```bash
-make test        # 67 fast tests — real Neo4j, no LLM calls
-make test-all    # + 7 live-model tests, including the adversarial ones
+make test        # fast suite — real Neo4j, no LLM calls
+make test-all    # + the live-model tests, including the adversarial ones
 ```
 
 Cypher is tested against a real Neo4j rather than a mock, because the Cypher *is* the logic.
@@ -267,5 +276,5 @@ app/
   web/index.html    the study ledger UI (single file, D3 graph)
 infra/              Terraform: VPC, NAT, Neo4j VM, Cloud Run, Pub/Sub, IAM, secrets
 docs/               architecture and data-model diagrams
-tests/              67 fast + 7 live-model tests
+tests/              fast suite (real Neo4j) + live-model tests behind `-m llm`
 ```

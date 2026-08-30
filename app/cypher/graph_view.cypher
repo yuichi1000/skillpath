@@ -1,12 +1,16 @@
 // Web UI のグラフ可視化用 (uid 分離を厳守: ユーザーの文脈に繋がるスキルのみ返す)
 
 // -- name: user_skill_ids --
-// ユーザーの習熟・模試・学習ブロックに繋がるスキル + その前提近傍 (3ホップ)
+// ユーザーの学習文脈に繋がるスキル + その前提近傍 (3ホップ)。
+// 受験予定の資格が要求するスキルは、まだ学習ブロックが割り当たっていなくても
+// 必ず含める (調べた出題範囲が UI から消えて「範囲が減った」ように見えるため)。
 MATCH (u:User {uid: $uid})
 OPTIONAL MATCH (u)-[:COMPLETED]->(a:Skill)
 OPTIONAL MATCH (u)-[:TOOK]->(:Assessment)-[:ASSESSED]->(b:Skill)
 OPTIONAL MATCH (u)-[:SCHEDULED]->(:LearningSession)-[:TARGETS]->(c:Skill)
-WITH collect(DISTINCT a.id) + collect(DISTINCT b.id) + collect(DISTINCT c.id) AS seed_ids
+OPTIONAL MATCH (u)-[:PURSUES]->(:Certification)-[:REQUIRES]->(d:Skill)
+WITH collect(DISTINCT a.id) + collect(DISTINCT b.id) + collect(DISTINCT c.id)
+   + collect(DISTINCT d.id) AS seed_ids
 MATCH (s:Skill) WHERE s.id IN seed_ids
 OPTIONAL MATCH (s)-[:PREREQUISITE_OF*1..3]-(nb:Skill)
 WITH collect(DISTINCT s.id) + collect(DISTINCT nb.id) AS ids

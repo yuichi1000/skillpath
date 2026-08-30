@@ -81,3 +81,26 @@ async def test_graph_view_respects_allowlist(monkeypatch, neo4j):
     async with client() as c:
         res = await c.get("/graph", params={"uid": "test-w-user"})
     assert res.status_code == 403
+
+
+async def test_graph_shows_every_skill_the_exam_requires(weakness_graph):
+    """学習ブロックがまだ無いスキルも、受験予定の資格の範囲なら UI に出る。
+
+    ここが漏れると「エージェントが調べた出題範囲が勝手に減った」ように見える。
+    """
+    from app.tools.neo4j_tool import run_query
+
+    run_query(
+        """
+        MATCH (u:User {uid: 'test-w-user'})
+        CREATE (c:Certification {id: 'test-w-cert', name: 'test 資格'})
+        CREATE (orphan:Skill {id: 'test-w-orphan', name: 'test 未計画スキル',
+                              match_key: 'test未計画スキル'})
+        CREATE (u)-[:PURSUES {deadline: date('2026-12-01')}]->(c)
+        CREATE (c)-[:REQUIRES]->(orphan)
+        """
+    )
+    async with client() as c:
+        res = await c.get("/graph", params={"uid": "test-w-user"})
+    ids = {n["id"] for n in res.json()["nodes"]}
+    assert "test-w-orphan" in ids

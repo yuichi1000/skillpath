@@ -9,7 +9,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-Intent = Literal["register", "assessment", "query"]
+# unrelated / unsafe は「何も書き込まずに断る」経路。判定は LLM だが、
+# 断ること自体は fail-safe (書き込みが起きない側) なので安全側に倒れる。
+Intent = Literal["register", "assessment", "query", "unrelated", "unsafe"]
 Depth = Literal["intro", "standard", "deep"]
 SessionKind = Literal["initial", "review"]
 
@@ -19,6 +21,12 @@ class RouterOutput(BaseModel):
     deadline: str = ""  # 入力に試験日・目標日があれば ISO 日付 (YYYY-MM-DD)、無ければ空
     start_date: str = ""  # 「来週から」等の学習開始希望日。無ければ空 (= 最速で開始)
     has_scores: bool = False  # 本文に採点済みの得点が含まれるか (登録と同時投入されうる)
+    reason: str = ""  # unrelated / unsafe と判定した場合の、利用者に示す短い理由
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _reason_to_empty(cls, v):
+        return (v or "")[:200]
 
     @field_validator("has_scores", mode="before")
     @classmethod

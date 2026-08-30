@@ -242,6 +242,20 @@ def feedback_store_node(ctx, uid: str, feedback_output: FeedbackOutput):
     return {"assessment_id": assessment_id, "skills": len(feedback_output.per_skill)}
 
 
+@node(name="decline")
+def decline_node(ctx, router_output: RouterOutput):
+    """このアプリの範囲外・応じるべきでない依頼を、何も書き込まずに断る終端。
+
+    判定自体は LLM だが、この経路は Neo4j にもカレンダーにも一切触れないので、
+    誤判定した場合の影響は「断ってしまう」側にしか出ない (fail-safe)。
+    """
+    ctx.state["summary"] = notifier_mod.build_decline_report(
+        router_output.intent, router_output.reason
+    )
+    logger.info("依頼を辞退: intent=%s reason=%r", router_output.intent, router_output.reason)
+    return ctx.state["summary"]
+
+
 @node(name="score_handoff")
 def score_handoff_node(ctx, user_input: str, attachment_b64: str = "", attachment_mime: str = ""):
     """登録経路から模試抽出へ渡すための原文再送 (LLM ノードは直前の出力しか見ない)。"""
@@ -371,6 +385,8 @@ def build_workflow(with_router: bool = True) -> Workflow:
                     "assessment": feedback_agent,
                     "register": ingestion_orchestrator_node,
                     "query": query_node,
+                    "unrelated": decline_node,
+                    "unsafe": decline_node,
                 },
             ),
             (feedback_agent, feedback_store_node, weakness_node),

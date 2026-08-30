@@ -68,6 +68,24 @@ def build_summary(
     return "\n".join(lines)
 
 
+def build_decline_report(intent: str, reason: str) -> str:
+    """範囲外・不適切な依頼を断るときの文面。何が起きたかを曖昧にしない。"""
+    head = (
+        "この依頼には応じられません。"
+        if intent == "unsafe"
+        else "この入力は SkillPath の扱う範囲ではないため、何も記録していません。"
+    )
+    body = f"\n\n理由: {reason}" if reason else ""
+    return (
+        f"{head}{body}\n\n"
+        "SkillPath ができるのは次の2つです。\n"
+        "・資格の登録: 「〇〇を受験します。試験日は〇年〇月〇日です」と書くと、"
+        "公式ガイドを調べて出題範囲を設定し、学習計画をカレンダーに登録します\n"
+        "・模試の反映: 分野ごとの得点が読み取れるテキストか画像を渡すと、"
+        "弱点とその前提スキルを検出して復習計画を組み直します"
+    )
+
+
 def build_no_weakness_report(weakness: WeaknessOutput, assessment_id: str = "") -> str:
     """何も記録されなかったときに、黙って終わらないための説明。"""
     if not assessment_id:

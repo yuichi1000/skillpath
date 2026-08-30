@@ -326,6 +326,7 @@ def notifier_node(
         kind=plan_kind,
         deadline=deadline,
         calendar_links=ctx.state.get("calendar_links") or {},
+        coverage=(ctx.state.get("ingestion_counts") or {}).get("by_domain"),
     )
     ctx.state["summary"] = summary
     return summary

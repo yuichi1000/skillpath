@@ -11,7 +11,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 MAX_NAME_LEN = 100
-MAX_SKILLS = 50
+MAX_SKILLS = 80
 MAX_RESOURCES = 20
 MAX_PREREQUISITES = 100
 MAX_COVERS = 100

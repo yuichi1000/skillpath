@@ -17,6 +17,7 @@ def build_summary(
     kind: str = "review",
     deadline: str = "",
     calendar_links: dict[str, str] | None = None,
+    coverage: dict[str, int] | None = None,
 ) -> str:
     names = {item.skill_id: item.name or item.skill_id for item in plan.plan}
 
@@ -31,6 +32,12 @@ def build_summary(
         for w in weakness.weak_skills:
             pres = ", ".join(p.name for p in w.unmastered_prerequisites) or "なし"
             lines.append(f"- {w.weak_skill_name} (スコア {w.score:.0%}) / 未習熟の前提: {pres}")
+        lines.append("")
+
+    if coverage:
+        lines.append("📋 公式試験ガイドのカバレッジ:")
+        for domain, count in coverage.items():
+            lines.append(f"  {domain}: {count} スキル")
         lines.append("")
 
     lines.append(f"学習順序 ({len(plan.plan)} 件):")

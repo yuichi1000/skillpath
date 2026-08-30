@@ -40,7 +40,9 @@ def ingestion_of() -> IngestionOutput:
 def test_store_resolves_names_and_writes_graph(weakness_graph):
     counts, targets, _cert_id = store_ingestion("test-w-user", ingestion_of(), threshold=0.6)
 
-    assert counts == {"skills": 2, "resources": 1, "prerequisites": 1, "covers": 1}
+    assert {k: v for k, v in counts.items() if k != "by_domain"} == {
+        "skills": 2, "resources": 1, "prerequisites": 1, "covers": 1
+    }
     # 既存スキルは名寄せされ、同名の新ノードは作られない
     rows = run_query("MATCH (s:Skill) WHERE s.name = 'test 機械学習' RETURN s.id AS id")
     assert [r["id"] for r in rows] == ["test-w-ml"]

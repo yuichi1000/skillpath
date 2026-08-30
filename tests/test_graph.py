@@ -51,4 +51,4 @@ async def test_deadline_from_state_limits_schedule(weakness_graph):
     assert sessions  # stats 40分 + ml 60分 は 9/2 夜の1スロットに収まる
     assert all(s["end"] < "2026-09-03" for s in sessions)
     assert "🎯 目標期限: 2026-09-03" in state["summary"]
-    assert "✅ 計画は期限内に収まっています" in state["summary"]
+    assert "✅ 計画は期限内に無理なく収まっています" in state["summary"]

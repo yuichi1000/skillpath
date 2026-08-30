@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from app.config import get_settings
-from app.models.schemas import PlannerOutput, SessionDraft, SessionKind, WeaknessOutput
+from app.models.schemas import PlanItem, PlannerOutput, SessionDraft, SessionKind, WeaknessOutput
 from app.tools.neo4j_tool import run_named
 
 logger = logging.getLogger(__name__)
@@ -73,6 +73,9 @@ FAR_FUTURE = datetime(9999, 12, 31)
 MAX_HORIZON_DAYS = 120  # 計画を先に伸ばす上限 (遠すぎる試験日で暴走させない)
 
 
+MIN_TAIL_MINUTES = 15  # 端数として置く最小の長さ。これ未満なら次の枠へ送る
+
+
 def allocate_groups(
     groups: list[PlanGroup],
     free_slots: list[TimeSlot],
@@ -85,11 +88,12 @@ def allocate_groups(
     保証されているため、資格間の優先順位はこれで決める。期限が同じ場合は
     復習 (弱点の穴埋め) を新規学習より先に置く。
 
+    枠の端数も使い切る: 90分ブロックが入らない残り時間でも、最小ブロック以上
+    あればそこまで進めて続きを翌日に回す。端数を捨てると、圧縮して収めたはずの
+    計画がまた溢れてしまう。
+
     同じスキルが複数グループに現れたら、優先度の高い方にだけ残す
     (資格をまたいで共有される前提スキルを二重に学習しないため)。
-
-    あるグループが自分の期限までに置ききれなくなっても、そこで消費しなかった
-    枠は後続グループがそのまま使える (カーソルを進めずに次のグループへ移る)。
     """
     config = config or ScheduleConfig()
     ordered = sorted(
@@ -105,64 +109,142 @@ def allocate_groups(
         items = [i for i in group.plan.plan if i.skill_id not in seen_skills]
         seen_skills.update(i.skill_id for i in items)
         warnings.extend(group.plan.warnings)
-        blocks = _split_into_blocks(PlannerOutput(plan=items), config)
-        placed_count = 0
-        for skill_id, duration, block_no, skill_name in blocks:
-            placed = False
-            while slot_i < len(free_slots):
+        # 期限までに入りきらないときは、末尾を捨てるのではなく全体を圧縮する。
+        # 範囲を削るより 1 周させる方が試験対策として有効なため。
+        items, fit_warnings = _fit_to_deadline(
+            items, _capacity(free_slots, slot_i, cursor, group.deadline), group, config
+        )
+        warnings.extend(fit_warnings)
+
+        unplaced: list[PlanItem] = []
+        exhausted = False
+        for index, item in enumerate(items):
+            if exhausted:
+                unplaced.extend(items[index:])
+                break
+            remaining = item.estimated_minutes
+            block_no = 1
+            while remaining > 0:
+                if slot_i >= len(free_slots):
+                    exhausted = True
+                    break
                 slot_start, slot_end = free_slots[slot_i]
                 start = cursor if cursor is not None and cursor > slot_start else slot_start
                 if group.deadline is not None and start >= group.deadline:
-                    break  # 期限切れ: カーソルは進めない (残り枠は後続グループが使う)
-                limit = min(slot_end, group.deadline) if group.deadline else slot_end
-                if limit - start >= timedelta(minutes=duration):
-                    sessions.append(
-                        SessionDraft(
-                            session_id=f"{group.plan_key}-{skill_id}-b{block_no}",
-                            skill_id=skill_id,
-                            skill_name=skill_name,
-                            start=start,
-                            end=start + timedelta(minutes=duration),
-                            kind=group.kind,
-                            cert_id=group.cert_id,
-                        )
-                    )
-                    cursor = start + timedelta(minutes=duration)
-                    placed = True
+                    # 期限切れ: カーソルは進めない (残り枠は後続グループが使う)
+                    exhausted = True
                     break
-                # このスロットには収まらない → 次のスロットへ (残り時間は捨てる)
-                slot_i += 1
-                cursor = None
-            if not placed:
-                break
-            placed_count += 1
+                limit = min(slot_end, group.deadline) if group.deadline else slot_end
+                space = int((limit - start).total_seconds() // 60)
+                take = min(remaining, config.max_block_minutes, space)
+                if take < min(config.min_block_minutes, remaining) or take < MIN_TAIL_MINUTES:
+                    slot_i += 1  # この枠の残りは短すぎる
+                    cursor = None
+                    continue
+                sessions.append(
+                    SessionDraft(
+                        session_id=f"{group.plan_key}-{item.skill_id}-b{block_no}",
+                        skill_id=item.skill_id,
+                        skill_name=item.name or item.skill_id,
+                        start=start,
+                        end=start + timedelta(minutes=take),
+                        kind=group.kind,
+                        cert_id=group.cert_id,
+                    )
+                )
+                cursor = start + timedelta(minutes=take)
+                remaining -= take
+                block_no += 1
+            if remaining > 0:
+                unplaced.append(item)
 
-        if placed_count < len(blocks):
-            warnings.extend(_shortfall_warnings(group, blocks, placed_count, free_slots))
+        if unplaced:
+            warnings.extend(_shortfall_warnings(group, unplaced, free_slots))
 
     return sessions, warnings
 
 
+def _capacity(
+    free_slots: list[TimeSlot], slot_i: int, cursor: datetime | None, deadline: datetime | None
+) -> int:
+    """今のカーソル位置から期限までに残っている学習可能時間 (分)。"""
+    total = 0
+    for i, (start, end) in enumerate(free_slots):
+        if i < slot_i:
+            continue
+        if i == slot_i and cursor is not None and cursor > start:
+            start = cursor
+        if deadline is not None:
+            end = min(end, deadline)
+        if end > start:
+            total += int((end - start).total_seconds() // 60)
+    return total
+
+
+def _fit_to_deadline(
+    items: list[PlanItem], capacity: int, group: PlanGroup, config: ScheduleConfig
+) -> tuple[list[PlanItem], list[str]]:
+    """期限に収まるよう各スキルの配分時間を圧縮し、その事実を警告として返す。
+
+    配分は Planner が習熟度を加味して出した所要時間の比率を保ったまま
+    一律に縮める。どこを削るかを LLM に判断させず、比率だけを機械的に扱う。
+    """
+    required = sum(i.estimated_minutes for i in items)
+    if group.deadline is None or capacity <= 0 or required <= capacity:
+        return items, []
+
+    label = f"「{group.label}」" if group.label else ""
+    scale = capacity / required
+    scaled = [
+        i.model_copy(
+            update={
+                "estimated_minutes": max(
+                    config.min_block_minutes, int(i.estimated_minutes * scale)
+                )
+            }
+        )
+        for i in items
+    ]
+    after = sum(i.estimated_minutes for i in scaled)
+    days = max((group.deadline - datetime.now()).days, 1)
+    warnings = [
+        f"{label}全範囲を {group.deadline:%Y-%m-%d} までに一周するには約 {required / 60:.0f} 時間"
+        f"必要ですが、空き時間から確保できるのは約 {capacity / 60:.0f} 時間です。"
+        f"各スキルの配分を {scale:.0%} に圧縮して {len(scaled)} スキル全てを計画しました"
+    ]
+    if after > capacity:
+        warnings.append(
+            f"{label}圧縮しても最短ブロック ({config.min_block_minutes}分) の下限で"
+            f"約 {(after - capacity) / 60:.0f} 時間分が残ります。"
+            "試験日を延ばすか、1日の学習枠を広げないと全範囲は終わりません"
+        )
+    else:
+        warnings.append(
+            f"{label}余裕はありません。1日あたり約 {after / 60 / days:.1f} 時間の学習が前提です"
+        )
+    return scaled, warnings
+
+
 def _shortfall_warnings(
-    group: PlanGroup,
-    blocks: list[tuple[str, int, int, str]],
-    placed_count: int,
-    free_slots: list[TimeSlot],
+    group: PlanGroup, unplaced: list[PlanItem], free_slots: list[TimeSlot]
 ) -> list[str]:
-    """置ききれなかったブロックについての警告文を作る。"""
+    """置ききれなかったスキルについて、不足量を具体的に伝える。"""
     label = f"「{group.label}」の" if group.label else ""
-    unplaced = list(dict.fromkeys(b[0] for b in blocks[placed_count:]))
+    names = ", ".join(i.name or i.skill_id for i in unplaced[:6])
+    if len(unplaced) > 6:
+        names += f" ほか{len(unplaced) - 6}件"
+    short = sum(i.estimated_minutes for i in unplaced)
     out = [
-        f"{label}空き時間が不足し {len(blocks) - placed_count} ブロックを配置できませんでした"
-        f" (未配置スキル: {', '.join(unplaced)})"
+        f"{label}空き時間が足りず {len(unplaced)} スキル分 (約 {short / 60:.0f} 時間) を"
+        f"計画に入れられませんでした: {names}"
     ]
     if group.deadline is not None:
-        total_minutes = sum(b[1] for b in blocks)
-        anchor = free_slots[0][0] if free_slots else None
-        days = max((group.deadline - anchor).days, 1) if anchor else 1
+        anchor = free_slots[0][0] if free_slots else datetime.now()
+        days = max((group.deadline - anchor).days, 1)
         out.append(
-            f"現在の空き時間では{label}期限 {group.deadline:%Y-%m-%d} に収まりません。"
-            f"全てを終えるには1日あたり約 {total_minutes / 60 / days:.1f} 時間の学習時間が必要です"
+            f"{label}期限 {group.deadline:%Y-%m-%d} に全範囲を収めるには"
+            f"1日あたり約 {short / 60 / days:.1f} 時間の追加が必要です。"
+            "試験日を延ばすか、1日の学習枠を広げてください"
         )
     return out
 

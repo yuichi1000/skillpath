@@ -91,9 +91,15 @@ class WorkflowState(BaseModel):
 
 
 @node(name="intake")
-def intake_node(ctx, node_input: str):
+def intake_node(ctx, node_input: str, attachment_b64: str = "", attachment_mime: str = ""):
+    """原文を state に保存し、添付を付け直して Router へ渡す。
+
+    ADK の自動変換は str 引数に対して inline_data を落とすため、ここで
+    復元しないと Router が添付を見られない。模試の写真だけを添えて
+    「この資格を登録して」と言われたとき、得点の存在を判定できなくなる。
+    """
     ctx.state["user_input"] = node_input
-    return node_input
+    return _content_with_attachment(node_input, attachment_b64, attachment_mime)
 
 
 def _content_with_attachment(text: str, attachment_b64: str, attachment_mime: str) -> types.Content:
@@ -204,15 +210,22 @@ def ingestion_store_node(
     # 登録の文面に模試の得点が混ざっていたら、そのまま採点処理へ回す。
     # (シラバスと最新の模試を一度に貼るのは自然な使い方で、
     #  登録だけ処理して得点を捨てると「反映されない」ように見える)
+    # 添付があるときは Router の判定に関わらず模試抽出を通す。
+    # 得点が無ければ feedback_store が何も書かずに素通りする (決定的な保険)。
     return Event(
         output={"counts": counts, "targets": targets, "cert_id": cert_id},
-        route=bool(has_scores),
+        route=bool(has_scores or ctx.state.get("attachment_b64")),
     )
 
 
 @node(name="feedback_store")
 def feedback_store_node(ctx, uid: str, feedback_output: FeedbackOutput):
-    # 名寄せ + 決定的な assessment_id 採番 + Neo4j 書き込み (Assessment/ASSESSED/習熟度EMA)
+    # 名寄せ + 決定的な assessment_id 採番 + Neo4j 書き込み (Assessment/ASSESSED/習熟度EMA)。
+    # 得点が1件も無いなら空の Assessment を作らずに素通りする
+    # (登録に添付が付いていただけ、というケース)。
+    if not feedback_output.per_skill:
+        ctx.state["assessment_id"] = ""
+        return {"assessment_id": "", "skills": 0}
     assessment_id = store_feedback(uid, feedback_output)
     ctx.state["assessment_id"] = assessment_id
     return {"assessment_id": assessment_id, "skills": len(feedback_output.per_skill)}
@@ -225,11 +238,15 @@ def score_handoff_node(ctx, user_input: str, attachment_b64: str = "", attachmen
 
 
 @node(name="weakness_detector")
-def weakness_node(ctx, assessment_id: str, uid: str, threshold: float = DEFAULT_THRESHOLD):
+def weakness_node(ctx, uid: str, assessment_id: str = "", threshold: float = DEFAULT_THRESHOLD):
     # 注意: WorkflowState の Pydantic デフォルトは実行時 state に自動注入されない。
     # ADK は「state 辞書 → 関数シグネチャのデフォルト」の順で束縛するため、
     # 省略可能なパラメータはここでデフォルトを持つ必要がある。
-    result = detect_weakness(assessment_id, uid, threshold)
+    result = (
+        detect_weakness(assessment_id, uid, threshold)
+        if assessment_id
+        else WeaknessOutput(weak_skills=[], cluster=[], has_weakness=False)
+    )
     ctx.state["weakness"] = result.model_dump()
     # 登録と同時に模試が来た場合、新規登録スキルと弱点クラスタの両方を計画対象にする
     targets = sorted(set(ctx.state.get("target_skill_ids") or []) | set(result.cluster))

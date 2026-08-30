@@ -87,6 +87,9 @@ def test_planning_horizon_reaches_the_furthest_exam_date(weakness_graph):
         deadline=datetime(2026, 11, 30),
         cert_id="test-w-cert-none",
     )
-    assert len(sessions) == 30  # 14日窓なら14個しか置けない
+    covered = {s.skill_id for s in sessions}
+    assert len(covered) == 30  # 14日窓なら14スキルで頭打ちになる
+    total = sum(int((s.end - s.start).total_seconds() // 60) for s in sessions)
+    assert total == 30 * 90
     assert max(s.start for s in sessions) > datetime(2026, 9, 20)
     assert all(s.start < datetime(2026, 11, 30) for s in sessions)

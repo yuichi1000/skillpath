@@ -55,7 +55,7 @@ def build_summary(
             lines.append(f"  {url}")
         lines.append("  (共有するには Google カレンダーの設定で公開してください)")
     if deadline and sessions and not schedule_warnings:
-        lines.append("✅ 計画は期限内に収まっています")
+        lines.append("✅ 計画は期限内に無理なく収まっています")
     for w in schedule_warnings or []:
         lines.append(f"⚠ {w}")
     return "\n".join(lines)

@@ -37,8 +37,10 @@ the scheduler fits them into your genuinely free evenings, earliest-deadline-fir
 
 ## Try it in two minutes
 
-Open **https://skillpath-workflow-924686405565.asia-northeast1.run.app** — the study ledger
-loads straight away. Three sample inputs are one click away in the left pane.
+Open **https://skillpath-workflow-924686405565.asia-northeast1.run.app** and sign in. The
+service sits behind Identity-Aware Proxy and admits exactly one demo account; its
+credentials are in the testing instructions of the Devpost submission. After sign-in the
+study ledger loads, with three sample inputs one click away in the left pane.
 
 1. **Register** — click *記入例: 資格の登録*, then **実行**. Watch the knowledge graph
    appear and a new certification tab arrive in the header.
@@ -47,10 +49,12 @@ loads straight away. Three sample inputs are one click away in the left pane.
 3. **Second mock exam** — click *記入例: 模試 二回目(改善)*, then **実行**. The improved
    skills go green, the weakness cluster shrinks, and the plan is rebuilt. Nothing duplicates.
 
-Or through the API:
+Or through the API. IAP redirects a bare `curl` to the Google sign-in, so this is shown
+against a local run (`make dev`); against the hosted service it needs an IAP identity token
+in an `Authorization: Bearer` header.
 
 ```bash
-URL=https://skillpath-workflow-924686405565.asia-northeast1.run.app
+URL=http://localhost:8080
 
 curl -s -X POST $URL/run -H 'Content-Type: application/json' -d '{
   "uid": "demo-user",
@@ -142,7 +146,7 @@ effect — the same layer the architecture is built around.
 | **Structure** | Extractor output must satisfy typed Pydantic schemas before any write. Nulls, unknown enum values and out-of-range numbers are coerced; only the structure and the entity-resolution keys are strict, so a slightly wrong model does not fail the run. |
 | **Volume** | Per request: ≤80 skills, ≤20 resources, ≤100 edges, ≤30 scores. Names are stripped of control characters and truncated. A "generate 1000 skills" injection cannot flood the graph. |
 | **Time** | A future exam date can never become an assessment timestamp — the deterministic `safe_taken_at` guard, added after the prompt-only fix proved insufficient. |
-| **Access** | `/admin/*` requires `X-Admin-Token` and is closed by default. `/run` validates uid format, caps the message at 8k characters, enforces an `ALLOWED_UIDS` allowlist, and rate-limits per minute. Attachments are restricted to PNG/JPEG/WebP/PDF and about 5 MB. Identity-Aware Proxy can be put in front of the service — the Terraform carries the bindings behind an `iap_members` variable — but the deployment judges use is open, so the allowlist is what contains it. |
+| **Access** | `/admin/*` requires `X-Admin-Token` and is closed by default. `/run` validates uid format, caps the message at 8k characters, enforces an `ALLOWED_UIDS` allowlist, and rate-limits per minute. Attachments are restricted to PNG/JPEG/WebP/PDF and about 5 MB. The deployed service is behind Identity-Aware Proxy: `allUsers` is off the invoker role, unauthenticated requests get a 302, and only the accounts in the Terraform `iap_members` variable are admitted. Organization-external accounts need a custom OAuth client on the IAP settings — the default internal client rejects them. |
 | **Failure** | LLM nodes retry transient errors with exponential backoff; a calendar outage degrades to placeholder slots with a warning rather than failing the workflow; LLM errors surface as a structured 502, never a stack trace. |
 | **Isolation** | Every user-scoped Cypher query filters by `uid`. Neo4j has no public IP; Cloud Run reaches it over direct VPC egress. |
 | **Scope** | A request that is not about studying for an exam, or one the app should not help with — obtaining leaked exam content, attacking someone, harvesting another person's data — is declined at the router and reaches a terminal node that touches neither the database nor the calendar. The judgement is deliberately placed where being wrong can only refuse. |
@@ -167,7 +171,7 @@ calendar but deliberately writes no ACL.
 | Agent framework | Google ADK 2.8 — graph workflow, `LlmAgent` + function nodes, dynamic node scheduling |
 | Graph database | Neo4j 5 LTS on Compute Engine, private VPC, no external IP |
 | Runtime | Cloud Run (direct VPC egress), FastAPI |
-| Async & secrets | Pub/Sub + DLQ, Secret Manager, Cloud Storage, Firestore |
+| Secrets | Secret Manager — Neo4j password, admin token, Calendar OAuth token |
 | External action | Google Calendar API — one calendar per certification, OAuth token in Secret Manager |
 | Build & IaC | Cloud Build, Artifact Registry, Terraform (`infra/`) |
 
@@ -221,25 +225,57 @@ Cypher is tested against a real Neo4j rather than a mock, because the Cypher *is
 
 ```bash
 cd infra
+cp terraform.tfvars.example terraform.tfvars   # set allow_unauthenticated / iap_members here
 terraform init
-terraform apply -var project_id=$PROJECT_ID        # everything but the service
+terraform apply                                 # everything but the service
 
 cd .. && gcloud builds submit \
   --tag $REGION-docker.pkg.dev/$PROJECT_ID/skillpath/workflow:latest
 
-cd infra && terraform apply -var project_id=$PROJECT_ID \
+cd infra && terraform apply \
   -var container_image=$REGION-docker.pkg.dev/$PROJECT_ID/skillpath/workflow:latest
 
 URL=$(terraform output -raw workflow_url)
 TOKEN=$(gcloud secrets versions access latest --secret=skillpath-admin-token)
+curl -X POST $URL/admin/init-schema -H "X-Admin-Token: $TOKEN"
+```
 
-# IAP is enabled once by hand (the provider has no argument for it); Terraform owns the
-# access bindings, so `iap_members` is what decides who gets in.
+`allow_unauthenticated` defaults to `true`. Leave it that way for an open deployment; set it
+to `false` and list `iap_members` to put the service behind IAP, then enable IAP itself once
+by hand — the provider has no argument for it, and Terraform owns only the bindings:
+
+```bash
 gcloud services enable iap.googleapis.com
 gcloud beta run services update skillpath-workflow --region=$REGION --iap
-curl -X POST $URL/admin/init-schema -H "X-Admin-Token: $TOKEN"
-curl -X POST $URL/admin/seed-demo   -H "X-Admin-Token: $TOKEN"
 ```
+
+**After any `terraform apply`, check that an unauthenticated request still gets a 302.** The
+provider does not know about IAP, so an apply that touches the service can drop the
+`iap-enabled` annotation while leaving `invoker_iam_disabled = true` behind — which is the
+one combination that leaves the service wide open. The module now ignores those fields, but
+verify rather than trust it.
+
+Two more things cost hours if you do not know them. IAP's IAM takes **several minutes** to
+propagate — a 403 one minute after granting the role means nothing, so wait before changing
+anything, and clear the session with `$URL/_gcp_iap/clear_login_cookie` before retesting.
+And an account **outside your Google Cloud organization** is rejected by IAP's default OAuth
+client no matter what the policy says; it needs a custom one:
+
+```bash
+# Console → Google Auth Platform → Clients → create a Web application client, then add
+#   https://iap.googleapis.com/v1/oauth/clientIds/CLIENT_ID:handleRedirect
+# to its authorized redirect URIs, and register the account under Audience → test users.
+cat > iap_settings.yaml <<EOF
+access_settings:
+  oauth_settings:
+    client_id: CLIENT_ID
+    client_secret: CLIENT_SECRET
+EOF
+gcloud iap settings set iap_settings.yaml --project=$PROJECT_ID
+```
+
+Admin endpoints sit behind IAP too, so run them before enabling it, or send an IAP identity
+token in an `Authorization: Bearer` header.
 
 Calendar on Cloud Run: run `calendar_auth` locally once, then
 `gcloud secrets create skillpath-calendar-token --data-file=calendar-token.json`. Without it
@@ -280,7 +316,7 @@ app/
   models/           Pydantic I/O schemas
   tools/            Neo4j driver, Calendar API, OAuth, schema init, demo seed
   web/index.html    the study ledger UI (single file, D3 graph)
-infra/              Terraform: VPC, NAT, Neo4j VM, Cloud Run, Pub/Sub, IAM, secrets
+infra/              Terraform: VPC, NAT, Neo4j VM, Cloud Run, IAM, secrets, IAP
 docs/               architecture and data-model diagrams
 tests/              fast suite (real Neo4j) + live-model tests behind `-m llm`
 ```

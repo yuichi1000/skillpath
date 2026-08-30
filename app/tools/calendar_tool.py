@@ -75,7 +75,11 @@ CALENDAR_COLOR_COUNT = 24
 
 
 def public_url(calendar_id: str) -> str:
-    """カレンダーを一般公開したあとに共有できる閲覧 URL。"""
+    """カレンダーの閲覧 URL。
+
+    一般公開したカレンダーなら誰でも開ける。公開せず特定アカウントに共有しただけの
+    場合は、そのアカウントでブラウザにログインしていれば開ける (ACL が効く)。
+    """
     tz = get_settings().schedule_tz
     return (
         "https://calendar.google.com/calendar/embed"

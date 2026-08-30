@@ -1,2 +1,5 @@
-project_id      = "skillpath-design"
-container_image = ""  # phase2 のイメージ push 後に asia-northeast1-docker.pkg.dev/skillpath-design/skillpath/workflow:latest を設定
+project_id            = "skillpath-design"
+container_image       = ""
+neo4j_machine_type    = "e2-medium"
+allow_unauthenticated = false
+iap_members           = ["user:you@example.com"]

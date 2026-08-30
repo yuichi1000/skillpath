@@ -37,6 +37,9 @@ resource "google_compute_instance" "neo4j" {
   tags           = ["neo4j"]
   desired_status = var.desired_status
 
+  # マシンタイプの変更には停止が要る。データは別ディスクなので停止しても消えない。
+  allow_stopping_for_update = true
+
   boot_disk {
     initialize_params {
       image = "debian-cloud/debian-12"

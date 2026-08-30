@@ -116,6 +116,23 @@ resource "google_cloud_run_v2_service" "workflow" {
     type    = "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"
     percent = 100
   }
+
+  # IAP の有効化は gcloud で行う (下の Identity-Aware Proxy 節を参照)。provider 6.x は
+  # IAP を知らないので、apply のたびに gcloud が立てた状態を消しにいく。
+  #
+  # 実際に本番を壊した: apply がサービスを更新した際に iap-enabled アノテーションが
+  # 落ち、invoker_iam_disabled=true だけが残って「IAP なし・invoker 判定なし」= 全公開に
+  # なった。apply のあとは必ず未認証アクセスが 302 になることを確認すること。
+  lifecycle {
+    ignore_changes = [
+      invoker_iam_disabled,
+      annotations, # run.googleapis.com/iap-enabled を消さない
+      client,
+      client_version,
+      # Cloud Run が既定値 (min=0) を返してくるだけで、config に書いても消えない差分
+      scaling,
+    ]
+  }
 }
 
 # Pub/Sub から Cloud Run を叩くための権限 (設計書 §7.9 から移動)

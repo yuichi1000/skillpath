@@ -134,13 +134,22 @@ def dispatch_node(
     if router_output.start_date and not ctx.state.get("schedule_start"):
         ctx.state["schedule_start"] = router_output.start_date
     ctx.state["has_scores"] = router_output.has_scores
+    logger.info(
+        "router: intent=%s deadline=%r start=%r has_scores=%s attachment=%s",
+        router_output.intent, router_output.deadline, router_output.start_date,
+        router_output.has_scores, bool(attachment_b64),
+    )
     content = _content_with_attachment(user_input, attachment_b64, attachment_mime)
     return Event(output=content, route=router_output.intent)
 
 
 @node(name="query_stub")
 def query_node(ctx):
-    msg = "質問応答 (query) は未実装です。"
+    msg = (
+        "質問応答としては受け取りましたが、この入力からは登録も採点も行いませんでした。\n\n"
+        "・資格を登録するなら「〇〇を受験します。試験日は〇年〇月〇日です」\n"
+        "・模試を反映するなら、分野ごとの得点が読み取れるテキストか画像"
+    )
     ctx.state["summary"] = msg
     return msg
 
@@ -207,6 +216,8 @@ def ingestion_store_node(
     ctx.state["plan_kind"] = "initial"
     ctx.state["cert_id"] = cert_id
     ctx.state["cert_name"] = cert_profile.name if cert_profile else ""
+    if not counts["skills"]:
+        logger.warning("登録経路だがスキルを1件も抽出できなかった (cert=%r)", cert_id)
     # 登録の文面に模試の得点が混ざっていたら、そのまま採点処理へ回す。
     # (シラバスと最新の模試を一度に貼るのは自然な使い方で、
     #  登録だけ処理して得点を捨てると「反映されない」ように見える)
@@ -333,8 +344,8 @@ def notifier_node(
 
 
 @node(name="report")
-def report_node(ctx, weakness: WeaknessOutput):
-    summary = notifier_mod.build_no_weakness_report(weakness)
+def report_node(ctx, weakness: WeaknessOutput, assessment_id: str = ""):
+    summary = notifier_mod.build_no_weakness_report(weakness, assessment_id)
     ctx.state["summary"] = summary
     return summary
 

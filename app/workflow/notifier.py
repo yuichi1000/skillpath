@@ -68,7 +68,16 @@ def build_summary(
     return "\n".join(lines)
 
 
-def build_no_weakness_report(weakness: WeaknessOutput) -> str:
+def build_no_weakness_report(weakness: WeaknessOutput, assessment_id: str = "") -> str:
+    """何も記録されなかったときに、黙って終わらないための説明。"""
+    if not assessment_id:
+        return (
+            "得点として読み取れる内容が見つからなかったため、何も記録していません。\n\n"
+            "・資格を登録したい場合は「〇〇を受験します。試験日は〇年〇月〇日です」のように、"
+            "資格名と試験日を本文に書いてください (出題範囲は公式ガイドを調べて設定します)\n"
+            "・模試の結果を反映したい場合は、分野ごとの得点 (例: ロードバランシング 3/12) が"
+            "読み取れるテキストか画像を渡してください"
+        )
     return "今回の模試に閾値未満の弱点スキルはありませんでした。現在の計画を継続してください。"
 
 

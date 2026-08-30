@@ -38,7 +38,7 @@ def ingestion_of() -> IngestionOutput:
 
 
 def test_store_resolves_names_and_writes_graph(weakness_graph):
-    counts, targets = store_ingestion("test-w-user", ingestion_of(), threshold=0.6)
+    counts, targets, _cert_id = store_ingestion("test-w-user", ingestion_of(), threshold=0.6)
 
     assert counts == {"skills": 2, "resources": 1, "prerequisites": 1, "covers": 1}
     # 既存スキルは名寄せされ、同名の新ノードは作られない
@@ -67,7 +67,7 @@ def test_targets_exclude_mastered_skills(weakness_graph):
         prerequisites=[],
         covers=[],
     )
-    _, targets = store_ingestion("test-w-user", out, threshold=0.6)
+    _, targets, _ = store_ingestion("test-w-user", out, threshold=0.6)
     # 数学基礎は mastery 0.9 で除外され、新規のベイズ統計だけが対象
     assert targets == ["skill-test-w-ベイズ統計"]
 

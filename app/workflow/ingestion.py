@@ -126,12 +126,18 @@ def build_cert_specialist(profile: CertProfile) -> LlmAgent:
 
 
 def store_ingestion(
-    uid: str, out: IngestionOutput, threshold: float, cert: CertProfile | None = None
-) -> tuple[dict, list[str]]:
-    """抽出結果を冪等に書き込み、(件数サマリ, 未習熟スキルID) を返す。
+    uid: str,
+    out: IngestionOutput,
+    threshold: float,
+    cert: CertProfile | None = None,
+    deadline: str = "",
+    start_date: str = "",
+) -> tuple[dict, list[str], str]:
+    """抽出結果を冪等に書き込み、(件数サマリ, 未習熟スキルID, 資格ID) を返す。
 
     LLM 出力はガードレール (sanitize) で量・長さを制限してから書き込む。
     cert が特定されていれば Certification ノードと REQUIRES を作成 (設計書 §3.1)。
+    試験日・開始日は受験者ごとに異なるので (User)-[:PURSUES]->(Certification) に持たせる。
     """
     ensure_user(uid)
 
@@ -184,14 +190,24 @@ def store_ingestion(
         run_named("ingestion.cypher", "merge_covers", covers=covers)
 
     cert_name = sanitize.clean_name(cert.name) if cert else ""
+    cert_id = ""
     if cert_name and skills:
+        cert_id = f"cert-{slugify(cert_name)}"
         run_named(
             "ingestion.cypher",
             "merge_certification",
-            cert_id=f"cert-{slugify(cert_name)}",
+            cert_id=cert_id,
             name=cert_name,
             vendor=sanitize.clean_name(cert.vendor),
             skill_ids=[s["id"] for s in skills],
+        )
+        run_named(
+            "ingestion.cypher",
+            "merge_pursues",
+            uid=uid,
+            cert_id=cert_id,
+            deadline=deadline,
+            start_date=start_date,
         )
 
     rows = run_named(
@@ -208,4 +224,4 @@ def store_ingestion(
         "prerequisites": len(prerequisites),
         "covers": len(covers),
     }
-    return counts, sorted(targets)
+    return counts, sorted(targets), cert_id

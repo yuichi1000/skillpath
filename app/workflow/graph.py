@@ -72,6 +72,8 @@ class WorkflowState(BaseModel):
     research_notes: str = ""  # リサーチャーによる公式情報の裏どり (出典URL含む)
     ingestion_output: IngestionOutput | None = None
     ingestion_counts: dict = Field(default_factory=dict)
+    cert_id: str = ""  # 今回登録した資格 (複数資格の再配置で「自分」を識別する)
+    cert_name: str = ""
     weakness: WeaknessOutput | None = None
     target_skill_ids: list[str] = Field(default_factory=list)
     plan_kind: str = "review"  # "initial" (新規登録) | "review" (復習)
@@ -170,12 +172,19 @@ def ingestion_store_node(
     ingestion_output: IngestionOutput,
     threshold: float = DEFAULT_THRESHOLD,
     cert_profile: CertProfile | None = None,
+    deadline: str = "",
 ):
-    counts, targets = store_ingestion(uid, ingestion_output, threshold, cert=cert_profile)
+    # 試験日は (User)-[:PURSUES]->(Certification) に永続化する。
+    # これが無いと次回以降の実行で資格間の期限を比較できない (EDF の前提)。
+    counts, targets, cert_id = store_ingestion(
+        uid, ingestion_output, threshold, cert=cert_profile, deadline=deadline
+    )
     ctx.state["ingestion_counts"] = counts
     ctx.state["target_skill_ids"] = targets
     ctx.state["plan_kind"] = "initial"
-    return {"counts": counts, "targets": targets}
+    ctx.state["cert_id"] = cert_id
+    ctx.state["cert_name"] = cert_profile.name if cert_profile else ""
+    return {"counts": counts, "targets": targets, "cert_id": cert_id}
 
 
 @node(name="feedback_store")
@@ -210,16 +219,23 @@ def planner_node(ctx, uid: str, target_skill_ids: list[str]):
 def scheduler_node(
     ctx, uid: str, plan: PlannerOutput, plan_kind: str,
     schedule_start: str = "", deadline: str = "",
+    cert_id: str = "", cert_name: str = "", threshold: float = DEFAULT_THRESHOLD,
 ):
     weakness = ctx.state.get("weakness")
+    # plan_key に資格を含める: 含めないと資格をまたぐ共有スキルの session_id が
+    # 衝突し、先に立てた予定が上書きされてしまう
+    plan_key = ctx.state.get("assessment_id") or f"{uid}-{cert_id or plan_kind}-{plan_kind}"
     sessions, warnings, calendar_ok = schedule_sessions(
         uid=uid,
         plan=plan,
         kind=plan_kind,
         start=datetime.fromisoformat(schedule_start) if schedule_start else datetime.now(),
-        plan_key=ctx.state.get("assessment_id") or f"{uid}-{plan_kind}",
+        plan_key=plan_key,
         deadline=datetime.fromisoformat(deadline) if deadline else None,
         weakness=WeaknessOutput.model_validate(weakness) if weakness else None,
+        cert_id=cert_id,
+        label=cert_name,
+        threshold=threshold,
     )
     ctx.state["calendar_synced"] = calendar_ok
     ctx.state["sessions"] = [s.model_dump(mode="json") for s in sessions]

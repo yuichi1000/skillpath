@@ -211,6 +211,7 @@ class SessionDraft(BaseModel):
     start: datetime
     end: datetime
     kind: SessionKind
+    cert_id: str = ""  # このブロックが属する資格 (カレンダーの振り分けに使う)
 
 
 class CreatedEvent(BaseModel):

@@ -66,3 +66,13 @@ MERGE (u:User {uid: $uid});
 // 名寄せでヒットしなかったスキル名の新規作成 (entity.resolve_skill_id が使用)
 MERGE (s:Skill {id: $id})
   ON CREATE SET s.name = $name, s.created_at = datetime();
+
+// -- name: merge_pursues --
+// ユーザーがその資格を目指していること + 試験日・開始日を記録する。
+// 試験日は受験者ごとに違うため Certification ではなくユーザー側のエッジに持たせる。
+// 空文字が来たときは既存値を消さない (毎回の実行で上書き消去しないため)。
+MATCH (u:User {uid: $uid}), (c:Certification {id: $cert_id})
+MERGE (u)-[p:PURSUES]->(c)
+  SET p.deadline   = CASE WHEN $deadline   = '' THEN p.deadline   ELSE date($deadline)   END,
+      p.start_date = CASE WHEN $start_date = '' THEN p.start_date ELSE date($start_date) END,
+      p.updated_at = datetime();

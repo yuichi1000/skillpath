@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 
 from app.models.schemas import PlanItem, PlannerOutput
-from app.workflow.scheduler import ScheduleConfig, allocate_sessions
+from app.workflow.scheduler import PlanGroup, ScheduleConfig, allocate_groups, allocate_sessions
 
 
 def plan_of(*items: tuple[str, int]) -> PlannerOutput:
@@ -127,3 +127,90 @@ def test_compute_free_slots_no_busy_equals_placeholder():
 
     start = datetime(2026, 9, 1)
     assert compute_free_slots(start, [], days=3) == placeholder_free_slots(start, days=3)
+
+
+# ---- 複数資格の同時進行 (EDF) ----
+
+
+def _plan(*skills: tuple[str, int]) -> PlannerOutput:
+    return PlannerOutput(
+        plan=[
+            PlanItem(order=i + 1, skill_id=sid, name=sid, estimated_minutes=m)
+            for i, (sid, m) in enumerate(skills)
+        ]
+    )
+
+
+def _slots(day_count: int = 6) -> list[tuple[datetime, datetime]]:
+    base = datetime(2026, 9, 1, 20, 0)
+    return [
+        (base + timedelta(days=i), base + timedelta(days=i, hours=2)) for i in range(day_count)
+    ]
+
+
+def test_earlier_deadline_gets_earlier_slots_regardless_of_registration_order():
+    """あとから登録した資格でも、期限が近ければ手前の枠を取る (EDF)。"""
+    late = PlanGroup(  # 先に登録された、期限の遠い資格
+        plan_key="u-cert-a-initial", plan=_plan(("a1", 90)), kind="initial",
+        deadline=datetime(2026, 10, 5), cert_id="cert-a", label="資格A",
+    )
+    soon = PlanGroup(  # あとから登録された、期限の近い資格
+        plan_key="u-cert-b-initial", plan=_plan(("b1", 90)), kind="initial",
+        deadline=datetime(2026, 9, 20), cert_id="cert-b", label="資格B",
+    )
+    sessions, _ = allocate_groups([late, soon], _slots())
+    by_skill = {s.skill_id: s.start for s in sessions}
+    assert by_skill["b1"] < by_skill["a1"]
+
+
+def test_groups_never_overlap_in_time():
+    """複数資格のブロックが同じ時間帯に二重登録されない。"""
+    groups = [
+        PlanGroup(plan_key="u-cert-a-initial", plan=_plan(("a1", 90), ("a2", 60)),
+                  kind="initial", deadline=datetime(2026, 10, 5), cert_id="cert-a"),
+        PlanGroup(plan_key="u-cert-b-initial", plan=_plan(("b1", 90), ("b2", 60)),
+                  kind="initial", deadline=datetime(2026, 10, 20), cert_id="cert-b"),
+    ]
+    sessions, _ = allocate_groups(groups, _slots())
+    assert len(sessions) == 4
+    ordered = sorted(sessions, key=lambda s: s.start)
+    for prev, nxt in zip(ordered, ordered[1:], strict=False):
+        assert prev.end <= nxt.start
+
+
+def test_shared_skill_is_scheduled_once_for_the_more_urgent_cert():
+    """資格をまたいで共有される前提スキルは、期限が近い側に1回だけ置かれる。"""
+    groups = [
+        PlanGroup(plan_key="u-cert-a-initial", plan=_plan(("shared", 60)),
+                  kind="initial", deadline=datetime(2026, 10, 5), cert_id="cert-a"),
+        PlanGroup(plan_key="u-cert-b-initial", plan=_plan(("shared", 60)),
+                  kind="initial", deadline=datetime(2026, 9, 20), cert_id="cert-b"),
+    ]
+    sessions, _ = allocate_groups(groups, _slots())
+    assert [s.cert_id for s in sessions] == ["cert-b"]
+
+
+def test_group_past_its_deadline_leaves_slots_for_the_others():
+    """期限に収まらないグループが残した枠を、後続の資格が使える。"""
+    groups = [
+        PlanGroup(plan_key="u-cert-a-initial", plan=_plan(("a1", 90), ("a2", 90)),
+                  kind="initial", deadline=datetime(2026, 9, 2, 21), cert_id="cert-a"),
+        PlanGroup(plan_key="u-cert-b-initial", plan=_plan(("b1", 90)),
+                  kind="initial", deadline=datetime(2026, 12, 1), cert_id="cert-b"),
+    ]
+    sessions, warnings = allocate_groups(groups, _slots())
+    assert "b1" in {s.skill_id for s in sessions}  # 資格Bは配置されている
+    assert any("収まりません" in w for w in warnings)  # 資格Aの不足は警告される
+
+
+def test_review_comes_before_new_material_on_the_same_deadline():
+    """期限が同じなら、弱点の復習を新規学習より先に置く。"""
+    deadline = datetime(2026, 10, 5)
+    groups = [
+        PlanGroup(plan_key="u-cert-a-initial", plan=_plan(("new1", 90)),
+                  kind="initial", deadline=deadline, cert_id="cert-a"),
+        PlanGroup(plan_key="u-assess-1", plan=_plan(("weak1", 90)),
+                  kind="review", deadline=deadline, cert_id="cert-a"),
+    ]
+    sessions, _ = allocate_groups(groups, _slots())
+    assert sessions[0].skill_id == "weak1"

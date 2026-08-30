@@ -8,17 +8,9 @@ resource "google_service_account" "neo4j" {
   display_name = "SkillPath Neo4j VM"
 }
 
-resource "google_service_account" "pubsub_invoker" {
-  account_id   = "skillpath-pubsub-invoker"
-  display_name = "SkillPath Pub/Sub Invoker"
-}
-
 locals {
   workflow_roles = [
     "roles/aiplatform.user",
-    "roles/datastore.user",
-    "roles/storage.objectAdmin",
-    "roles/pubsub.publisher",
     "roles/secretmanager.secretAccessor",
     "roles/cloudtrace.agent",
     "roles/logging.logWriter",

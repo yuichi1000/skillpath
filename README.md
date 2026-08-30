@@ -249,11 +249,16 @@ gcloud services enable iap.googleapis.com
 gcloud beta run services update skillpath-workflow --region=$REGION --iap
 ```
 
-**After any `terraform apply`, check that an unauthenticated request still gets a 302.** The
-provider does not know about IAP, so an apply that touches the service can drop the
-`iap-enabled` annotation while leaving `invoker_iam_disabled = true` behind — which is the
-one combination that leaves the service wide open. The module now ignores those fields, but
-verify rather than trust it.
+**Every `terraform apply` that touches the Cloud Run service turns IAP off.** The provider
+has no IAP field, so the update drops the `iap-enabled` annotation while `invoker_iam_disabled`
+stays set — the one combination that leaves the service wide open, with no IAP and no invoker
+check. `lifecycle { ignore_changes }` does not prevent it; this was measured, twice. So after
+every apply, re-run the enable command and confirm the 302:
+
+```bash
+gcloud beta run services update skillpath-workflow --region=$REGION --iap
+curl -s -o /dev/null -w '%{http_code}\n' $URL     # must be 302
+```
 
 Two more things cost hours if you do not know them. IAP's IAM takes **several minutes** to
 propagate — a 403 one minute after granting the role means nothing, so wait before changing

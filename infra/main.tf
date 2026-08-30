@@ -67,16 +67,6 @@ module "neo4j" {
   nat_id         = module.network.nat_id
 }
 
-module "data" {
-  source = "./modules/data"
-
-  project_id              = var.project_id
-  region                  = var.region
-  workflow_url            = var.container_image != "" ? module.cloudrun[0].url : ""
-  enable_push             = var.container_image != ""
-  pubsub_invoker_sa_email = module.iam.pubsub_invoker_sa_email
-}
-
 # phase1 (container_image 未指定) では Cloud Run を作らない。
 # イメージ push 後に container_image を渡して再 apply する (3段デプロイ)
 module "cloudrun" {
@@ -87,14 +77,12 @@ module "cloudrun" {
   region                   = var.region
   container_image          = var.container_image
   workflow_sa_email        = module.iam.workflow_sa_email
-  pubsub_invoker_sa_email  = module.iam.pubsub_invoker_sa_email
   network_id               = module.network.network_id
   cloudrun_subnetwork_id   = module.network.cloudrun_subnetwork_id
   neo4j_internal_ip        = module.neo4j.internal_ip
   neo4j_password_secret_id = module.neo4j.password_secret_id
   gemini_model             = var.gemini_model
   gemini_model_extract     = var.gemini_model_extract
-  upload_bucket_name       = module.data.upload_bucket_name
   allow_unauthenticated    = var.allow_unauthenticated
   iap_members              = var.iap_members
 }

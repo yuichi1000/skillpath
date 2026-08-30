@@ -88,10 +88,6 @@ resource "google_cloud_run_v2_service" "workflow" {
         value = var.gemini_model_extract
       }
       env {
-        name  = "GCS_UPLOAD_BUCKET"
-        value = var.upload_bucket_name
-      }
-      env {
         name  = "CALENDAR_ENABLED"
         value = "true" # トークン未登録の間は自動でプレースホルダにフォールバックする
       }
@@ -120,9 +116,10 @@ resource "google_cloud_run_v2_service" "workflow" {
   # IAP の有効化は gcloud で行う (下の Identity-Aware Proxy 節を参照)。provider 6.x は
   # IAP を知らないので、apply のたびに gcloud が立てた状態を消しにいく。
   #
-  # 実際に本番を壊した: apply がサービスを更新した際に iap-enabled アノテーションが
+  # 実際に本番を2回壊した: apply がサービスを更新すると iap-enabled アノテーションが
   # 落ち、invoker_iam_disabled=true だけが残って「IAP なし・invoker 判定なし」= 全公開に
-  # なった。apply のあとは必ず未認証アクセスが 302 になることを確認すること。
+  # なる。ignore_changes を入れても防げない (実測)。サービスに触る apply のあとは
+  # 必ず --iap を打ち直し、未認証アクセスが 302 になることを確認すること。
   lifecycle {
     ignore_changes = [
       invoker_iam_disabled,
@@ -133,14 +130,6 @@ resource "google_cloud_run_v2_service" "workflow" {
       scaling,
     ]
   }
-}
-
-# Pub/Sub から Cloud Run を叩くための権限 (設計書 §7.9 から移動)
-resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
-  name     = google_cloud_run_v2_service.workflow.name
-  location = var.region
-  role     = "roles/run.invoker"
-  member   = "serviceAccount:${var.pubsub_invoker_sa_email}"
 }
 
 # 未認証公開。IAP で保護する場合は false のままにする

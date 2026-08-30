@@ -14,10 +14,6 @@ variable "workflow_sa_email" {
   type = string
 }
 
-variable "pubsub_invoker_sa_email" {
-  type = string
-}
-
 variable "network_id" {
   type = string
 }
@@ -39,10 +35,6 @@ variable "gemini_model" {
 }
 
 variable "gemini_model_extract" {
-  type = string
-}
-
-variable "upload_bucket_name" {
   type = string
 }
 

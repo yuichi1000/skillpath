@@ -46,7 +46,7 @@ def build_summary(
             wd = _WEEKDAYS_JP[s.start.weekday()]
             lines.append(
                 f"  {s.start:%m/%d}({wd}) {s.start:%H:%M}-{s.end:%H:%M}"
-                f" {names.get(s.skill_id, s.skill_id)}"
+                f" {s.skill_name or names.get(s.skill_id, s.skill_id)}"
             )
     if calendar_links:
         lines.append("")

@@ -209,6 +209,7 @@ class SessionDraft(BaseModel):
 
     session_id: str
     skill_id: str
+    skill_name: str = ""  # 表示用。所見・イベント名で skill_id が露出しないように
     start: datetime
     end: datetime
     kind: SessionKind

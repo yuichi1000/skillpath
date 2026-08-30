@@ -6,6 +6,7 @@ PURSUES による試験日の永続化 → 他資格の再計画 → EDF 配置 
 
 from datetime import datetime
 
+from app.models.schemas import PlanItem, PlannerOutput
 from app.tools.neo4j_tool import run_query
 from app.workflow.scheduler import other_pursuit_groups, schedule_sessions
 
@@ -63,3 +64,29 @@ def test_later_registered_cert_with_nearer_deadline_wins_the_early_slots(weaknes
     for prev, nxt in zip(ordered, ordered[1:], strict=False):
         assert prev.end <= nxt.start
     assert any("他に進行中の資格" in w for w in warnings)
+
+
+def test_planning_horizon_reaches_the_furthest_exam_date(weakness_graph):
+    """計画期間は一番遠い試験日まで伸びる (14日固定だと遠い試験の分が入りきらない)。
+
+    1日の学習枠は 20-22時の2時間。90分ブロックは1日1個しか入らないので、
+    30個を置くには30日ぶんの枠が要る (14日固定なら14個で頭打ちになる)。
+    """
+    plan = PlannerOutput(
+        plan=[
+            PlanItem(order=i + 1, skill_id=f"test-w-s{i}", name=f"skill{i}", estimated_minutes=90)
+            for i in range(30)
+        ]
+    )
+    sessions, _warnings, _ok, _links = schedule_sessions(
+        uid="test-w-user",
+        plan=plan,
+        kind="initial",
+        start=datetime(2026, 9, 1),
+        plan_key="test-w-user-horizon-initial",
+        deadline=datetime(2026, 11, 30),
+        cert_id="test-w-cert-none",
+    )
+    assert len(sessions) == 30  # 14日窓なら14個しか置けない
+    assert max(s.start for s in sessions) > datetime(2026, 9, 20)
+    assert all(s.start < datetime(2026, 11, 30) for s in sessions)

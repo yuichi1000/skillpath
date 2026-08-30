@@ -32,20 +32,27 @@ class ScheduleConfig:
 
 def _split_into_blocks(
     plan: PlannerOutput, config: ScheduleConfig
-) -> list[tuple[str, int, int]]:
+) -> list[tuple[str, int, int, str]]:
     """各スキルの所要時間を (skill_id, 分, ブロック番号) に分割する。
 
     端数が min_block_minutes 未満になる場合は min まで切り上げる
     (短すぎるブロックはカレンダーに置く価値が薄いため)。
     """
-    blocks: list[tuple[str, int, int]] = []
+    blocks: list[tuple[str, int, int, str]] = []
     for item in plan.plan:
         remaining = item.estimated_minutes
         block_no = 1
         while remaining > 0:
             duration = min(config.max_block_minutes, remaining)
             remaining -= duration
-            blocks.append((item.skill_id, max(duration, config.min_block_minutes), block_no))
+            blocks.append(
+                (
+                    item.skill_id,
+                    max(duration, config.min_block_minutes),
+                    block_no,
+                    item.name or item.skill_id,
+                )
+            )
             block_no += 1
     return blocks
 
@@ -63,6 +70,7 @@ class PlanGroup:
 
 
 FAR_FUTURE = datetime(9999, 12, 31)
+MAX_HORIZON_DAYS = 120  # 計画を先に伸ばす上限 (遠すぎる試験日で暴走させない)
 
 
 def allocate_groups(
@@ -99,7 +107,7 @@ def allocate_groups(
         warnings.extend(group.plan.warnings)
         blocks = _split_into_blocks(PlannerOutput(plan=items), config)
         placed_count = 0
-        for skill_id, duration, block_no in blocks:
+        for skill_id, duration, block_no, skill_name in blocks:
             placed = False
             while slot_i < len(free_slots):
                 slot_start, slot_end = free_slots[slot_i]
@@ -112,6 +120,7 @@ def allocate_groups(
                         SessionDraft(
                             session_id=f"{group.plan_key}-{skill_id}-b{block_no}",
                             skill_id=skill_id,
+                            skill_name=skill_name,
                             start=start,
                             end=start + timedelta(minutes=duration),
                             kind=group.kind,
@@ -136,7 +145,7 @@ def allocate_groups(
 
 def _shortfall_warnings(
     group: PlanGroup,
-    blocks: list[tuple[str, int, int]],
+    blocks: list[tuple[str, int, int, str]],
     placed_count: int,
     free_slots: list[TimeSlot],
 ) -> list[str]:
@@ -361,7 +370,13 @@ def schedule_sessions(
     pursuits = run_named("scheduler.cypher", "user_pursuits", uid=uid)
     groups += other_pursuit_groups(uid, cert_id, threshold, pursuits=pursuits)
 
-    window_end = start + timedelta(days=15)
+    # 計画期間: 一番遠い試験日まで見る。14日固定だと2つ目の資格が窓からあふれ、
+    # 「空き時間不足」に見えてしまう (実際には期間が足りていないだけ)
+    deadlines = [g.deadline for g in groups if g.deadline]
+    horizon = 14
+    if deadlines:
+        horizon = max(14, min(MAX_HORIZON_DAYS, (max(deadlines) - start).days + 1))
+    window_end = start + timedelta(days=horizon + 1)
     # 空き時間の判定対象: 本人の予定 (primary) + 既存の資格カレンダー。
     # 資格カレンダーを見ないと、他資格の学習ブロックが「無い」ことになってしまう。
     calendar_ids = ("primary", *(p["calendar_id"] for p in pursuits if p["calendar_id"]))
@@ -374,14 +389,14 @@ def schedule_sessions(
             busy = calendar_tool.get_busy(
                 start, window_end, calendar_ids=calendar_ids, own_prefix=f"{uid}-"
             )
-            slots = compute_free_slots(start, busy)
+            slots = compute_free_slots(start, busy, days=horizon)
             calendar_ok = True
         except calendar_tool.CalendarUnavailable as e:
             logger.warning("Calendar 未接続のためプレースホルダで続行: %s", e)
             warnings_extra.append("カレンダー未接続のため仮の空き時間で計画しています")
-            slots = placeholder_free_slots(start)
+            slots = placeholder_free_slots(start, days=horizon)
     else:
-        slots = placeholder_free_slots(start)
+        slots = placeholder_free_slots(start, days=horizon)
 
     sessions, warnings = allocate_groups(groups, slots)
     if len(groups) > 1:

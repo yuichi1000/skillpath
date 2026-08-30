@@ -214,3 +214,11 @@ def test_review_comes_before_new_material_on_the_same_deadline():
     ]
     sessions, _ = allocate_groups(groups, _slots())
     assert sessions[0].skill_id == "weak1"
+
+
+def test_blocks_carry_display_names():
+    """所見やカレンダーに skill_id が露出しないよう、ブロックが表示名を持つ。"""
+    g = PlanGroup(plan_key="u-cert-a-initial", plan=_plan(("a1", 60)), kind="initial")
+    g.plan.plan[0].name = "ディープラーニング手法"
+    sessions, _ = allocate_groups([g], _slots())
+    assert sessions[0].skill_name == "ディープラーニング手法"

@@ -373,6 +373,7 @@ $("#runBtn").addEventListener("click", async () => {
       throw new Error(typeof d === "string" ? d : (d?.error || "エラー") + (d?.hint ? ` — ${d.hint}` : ""));
     }
     renderRun(body);
+    saveLastRun(uid, body);
     await loadGraph(uid);
     setStatus(`完了 (${Math.floor((Date.now()-t0)/1000)}秒) — 判定: ${labelIntent(body.intent)}`);
   } catch (e) {
@@ -417,6 +418,33 @@ function renderRun(d) {
 }
 const hm = (t) => `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+// ---------- 直近の実行結果をブラウザに残す ----------
+// 所見と学習計画は Neo4j に持たないため、リロードすると消えてしまう。
+// 何が起きたか読み返せないと、うまくいかなかった時に原因が追えない。
+const LAST_RUN_KEY = "skillpath:lastRun:";
+
+function saveLastRun(uid, body) {
+  try {
+    const { summary, plan, schedule_warnings, research_notes, intent, calendar_links } = body;
+    localStorage.setItem(LAST_RUN_KEY + uid, JSON.stringify({
+      summary, plan, schedule_warnings, research_notes, intent, calendar_links,
+      at: new Date().toISOString(),
+    }));
+  } catch (e) { /* 保存できなくても実行結果の表示自体は妨げない */ }
+}
+
+function restoreLastRun(uid) {
+  try {
+    const raw = localStorage.getItem(LAST_RUN_KEY + uid);
+    if (!raw) return;
+    const body = JSON.parse(raw);
+    renderRun(body);
+    const at = new Date(body.at);
+    setStatus(`前回の実行結果を表示しています (${at.getMonth() + 1}/${at.getDate()} ` +
+              `${hm(at)} — 判定: ${labelIntent(body.intent)})`);
+  } catch (e) { /* 壊れていたら黙って捨てる */ }
+}
 
 // ---------- 帳面の状態 (資格の絞り込み) ----------
 const STATE = { graph: null, cert: "" };
@@ -651,6 +679,7 @@ function renderAssessments(assessments) {
 }
 
 // ---------- 初期表示 ----------
+restoreLastRun($("#uid").value);
 loadGraph($("#uid").value);
 </script>
 </body>

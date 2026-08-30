@@ -1,12 +1,31 @@
 // -- name: dedupe_skill --
-// 既存スキルとの重複チェック（名前完全一致 or エイリアス一致）
+// 名寄せ第1段: 正規化キー (空白・記号を落とした表記) の完全一致
 MATCH (s:Skill)
-WHERE toLower(s.name) = toLower($name)
-   OR $name IN coalesce(s.aliases, [])
+WHERE s.match_key = $key
+   OR $key IN coalesce(s.alias_keys, [])
+   OR (s.match_key IS NULL AND toLower(s.name) = $name)  // 索引が無い旧ノードへの保険
 RETURN s.id AS id
+ORDER BY s.created_at ASC, s.id ASC  // 同じキーが複数あっても常に同じノードへ寄せる
+LIMIT 1;
+
+// -- name: fuzzy_skill --
+// 名寄せ第2段: 包含関係かつ長さ比 0.6 以上。短い側が長い側に埋もれる誤爆
+// (「VPC」が「VPC設計IP管理」に一致する類) を長さ比で弾く
+MATCH (s:Skill)
+WHERE s.match_key IS NOT NULL
+  AND size(s.match_key) >= 4 AND size($key) >= 4
+  AND (s.match_key CONTAINS $key OR $key CONTAINS s.match_key)
+WITH s,
+     toFloat(CASE WHEN size($key) < size(s.match_key) THEN size($key) ELSE size(s.match_key) END)
+     / CASE WHEN size($key) > size(s.match_key) THEN size($key) ELSE size(s.match_key) END AS ratio
+WHERE ratio >= 0.6
+RETURN s.id AS id, ratio
+ORDER BY ratio DESC
 LIMIT 1;
 
 // -- name: merge_skills --
+// match_key / alias_keys は名寄せの索引。既存ノードにも必ず入れ直す
+// (これが欠けると、次に来た表記ゆれが別ノードとして増えてしまう)
 UNWIND $skills AS sk
 MERGE (s:Skill {id: sk.id})
   ON CREATE SET s.name = sk.name,
@@ -15,7 +34,10 @@ MERGE (s:Skill {id: sk.id})
                 s.domain = sk.domain,
                 s.created_at = datetime()
   ON MATCH  SET s.description = coalesce(sk.description, s.description),
-                s.updated_at = datetime();
+                s.estimated_hours = coalesce(s.estimated_hours, sk.estimated_hours),
+                s.updated_at = datetime()
+  SET s.match_key = sk.match_key,
+      s.alias_keys = sk.alias_keys;
 
 // -- name: merge_prerequisites --
 UNWIND $prerequisites AS p
@@ -65,7 +87,8 @@ MERGE (u:User {uid: $uid});
 // -- name: create_skill_if_absent --
 // 名寄せでヒットしなかったスキル名の新規作成 (entity.resolve_skill_id が使用)
 MERGE (s:Skill {id: $id})
-  ON CREATE SET s.name = $name, s.created_at = datetime();
+  ON CREATE SET s.name = $name, s.created_at = datetime()
+  SET s.match_key = $key, s.alias_keys = $alias_keys;
 
 // -- name: merge_pursues --
 // ユーザーがその資格を目指していること + 試験日・開始日を記録する。

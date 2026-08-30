@@ -11,18 +11,24 @@ import pytest
 from app.tools import neo4j_tool
 from app.tools.init_schema import init_schema
 
+# テストが作るノードは 'test-w-' 接頭辞か、名寄せで採番される 'skill-test-' / 'res-test-'。
+# どちらも消さないと、次のテストの名寄せが前のテストの残骸に当たる。
 CLEANUP = """
-MATCH (n) WHERE coalesce(n.id, n.uid, '') CONTAINS 'test-w'
+MATCH (n)
+WHERE coalesce(n.id, n.uid, '') CONTAINS 'test-w'
+   OR coalesce(n.id, '') STARTS WITH 'skill-test'
+   OR coalesce(n.id, '') STARTS WITH 'res-test'
+   OR coalesce(n.id, '') STARTS WITH 'cert-test'
 DETACH DELETE n
 """
 
 SEED = """
 CREATE (u:User {uid: 'test-w-user', timezone: 'Asia/Tokyo'})
 CREATE (u2:User {uid: 'test-w-user2', timezone: 'Asia/Tokyo'})
-CREATE (math:Skill {id: 'test-w-math', name: 'test 数学基礎'})
-CREATE (stats:Skill {id: 'test-w-stats', name: 'test 確率統計'})
-CREATE (ml:Skill {id: 'test-w-ml', name: 'test 機械学習'})
-CREATE (db:Skill {id: 'test-w-db', name: 'test データベース'})
+CREATE (math:Skill {id: 'test-w-math', name: 'test 数学基礎', match_key: 'test数学基礎'})
+CREATE (stats:Skill {id: 'test-w-stats', name: 'test 確率統計', match_key: 'test確率統計'})
+CREATE (ml:Skill {id: 'test-w-ml', name: 'test 機械学習', match_key: 'test機械学習'})
+CREATE (db:Skill {id: 'test-w-db', name: 'test データベース', match_key: 'testデータベース'})
 CREATE (math)-[:PREREQUISITE_OF {strength: 0.9}]->(stats)
 CREATE (stats)-[:PREREQUISITE_OF {strength: 0.9}]->(ml)
 

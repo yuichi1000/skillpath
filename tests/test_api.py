@@ -25,7 +25,7 @@ async def test_init_schema(neo4j, monkeypatch):
     async with client() as c:
         res = await c.post("/admin/init-schema", headers={"X-Admin-Token": "test-admin"})
     assert res.status_code == 200
-    assert res.json()["applied"] == 6
+    assert res.json()["applied"] == 7
 
 
 async def test_seed_demo(neo4j, monkeypatch):

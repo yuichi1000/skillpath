@@ -18,6 +18,12 @@ class RouterOutput(BaseModel):
     intent: Intent
     deadline: str = ""  # 入力に試験日・目標日があれば ISO 日付 (YYYY-MM-DD)、無ければ空
     start_date: str = ""  # 「来週から」等の学習開始希望日。無ければ空 (= 最速で開始)
+    has_scores: bool = False  # 本文に採点済みの得点が含まれるか (登録と同時投入されうる)
+
+    @field_validator("has_scores", mode="before")
+    @classmethod
+    def _none_to_false(cls, v):
+        return bool(v)
 
     @field_validator("deadline", "start_date", mode="before")
     @classmethod

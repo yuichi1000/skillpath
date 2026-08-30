@@ -428,8 +428,12 @@ async function loadGraph(uid) {
   const res = await fetch(`/graph?uid=${encodeURIComponent(uid)}`);
   if (!res.ok) return;
   STATE.graph = await res.json();
-  const certs = STATE.graph.certifications || [];
-  if (STATE.cert && !certs.some(c => c.id === STATE.cert)) STATE.cert = "";
+  // 試験日が近い資格から並べ、常にどれか1つを選んだ状態にする
+  const certs = (STATE.graph.certifications || [])
+    .slice()
+    .sort((a, b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"));
+  STATE.graph.certifications = certs;
+  if (!certs.some(c => c.id === STATE.cert)) STATE.cert = certs.length ? certs[0].id : "";
   renderCerts(certs);
   renderAssessments(STATE.graph.assessments || []);
   renderSchedule();
@@ -437,7 +441,8 @@ async function loadGraph(uid) {
 }
 
 function activeCert() {
-  return (STATE.graph?.certifications || []).find(c => c.id === STATE.cert) || null;
+  const certs = STATE.graph?.certifications || [];
+  return certs.find(c => c.id === STATE.cert) || certs[0] || null;
 }
 
 /** 選択中の資格に属するスキルと、その前提を遡った範囲だけを残す。 */
@@ -461,9 +466,7 @@ function visibleGraph() {
 }
 
 function renderCerts(certs) {
-  $("#certLine").innerHTML = certs.length
-    ? `${certs.length} 件の資格を並行`
-    : "";
+  $("#certLine").innerHTML = certs.length > 1 ? `${certs.length} 件の資格を並行` : "";
   $("#certTabs").hidden = certs.length === 0;
   $("#certMeta").hidden = true;
   if (!certs.length) { $("#certTabs").innerHTML = ""; return; }
@@ -471,9 +474,7 @@ function renderCerts(certs) {
   const tab = (id, label, due) =>
     `<button data-cert="${esc(id)}" class="${STATE.cert === id ? "on" : ""}">` +
     `${esc(label)}${due ? `<span class="due">${due}</span>` : ""}</button>`;
-  $("#certTabs").innerHTML =
-    tab("", "すべて", "") +
-    certs.map(c => tab(c.id, c.name, daysLeft(c.deadline))).join("");
+  $("#certTabs").innerHTML = certs.map(c => tab(c.id, c.name, daysLeft(c.deadline))).join("");
   $("#certTabs").querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => {
       STATE.cert = b.dataset.cert;
@@ -504,9 +505,8 @@ function daysLeft(deadline) {
 /** 時間割。/graph の登録済みブロックを正とするので、再読込しても消えない。 */
 function renderSchedule() {
   const all = STATE.graph?.sessions || [];
-  const list = STATE.cert
-    ? all.filter(s => (s.cert_ids || []).includes(STATE.cert))
-    : all;
+  const cert = activeCert();
+  const list = cert ? all.filter(s => (s.cert_ids || []).includes(cert.id)) : all;
   if (!list.length) {
     $("#scheduleWrap").innerHTML = `<div class="empty">まだ予定はありません。</div>`;
     return;

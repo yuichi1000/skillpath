@@ -3,11 +3,15 @@
 グラフ構成:
 
     START → intake → router(LLM) → dispatch ─ StringRoute
-        ├ "assessment" → feedback_extract(LLM) → feedback_store ─┐
-        ├ "register"   → ingestion_extract(LLM) → ingestion_store ─→ planner
-        └ "query"      → query_stub                              │      │
-    feedback_store → weakness_detector ─ has_weakness? ─ True ───┘      ▼
-                                       └ False → report          scheduler → notifier
+        ├ "assessment" → feedback_extract(LLM) → feedback_store ──────┐
+        ├ "register"   → ingestion_orchestrator(LLM) → ingestion_store │
+        │                    has_scores? ─ True → score_handoff ───────┤ (原文を再送)
+        │                                └ False ──────────────┐       │
+        └ "query"      → query_stub                            │       ▼
+                                                               │  weakness_detector
+                                    計画対象あり ────────────────┴──── ┤
+                                                                      ▼
+                                    計画対象なし → report          planner → scheduler → notifier
 
 対象スキル集合 (設計書 §4.2「新規登録 or 弱点クラスタ」) は state の
 target_skill_ids に統一: weakness_detector が弱点クラスタを、
@@ -74,6 +78,7 @@ class WorkflowState(BaseModel):
     ingestion_counts: dict = Field(default_factory=dict)
     cert_id: str = ""  # 今回登録した資格 (複数資格の再配置で「自分」を識別する)
     cert_name: str = ""
+    has_scores: bool = False  # 登録と同じ文面に模試の得点が含まれていた
     weakness: WeaknessOutput | None = None
     target_skill_ids: list[str] = Field(default_factory=list)
     plan_kind: str = "review"  # "initial" (新規登録) | "review" (復習)
@@ -122,6 +127,7 @@ def dispatch_node(
         ctx.state["deadline"] = router_output.deadline
     if router_output.start_date and not ctx.state.get("schedule_start"):
         ctx.state["schedule_start"] = router_output.start_date
+    ctx.state["has_scores"] = router_output.has_scores
     content = _content_with_attachment(user_input, attachment_b64, attachment_mime)
     return Event(output=content, route=router_output.intent)
 
@@ -178,6 +184,7 @@ def ingestion_store_node(
     cert_profile: CertProfile | None = None,
     deadline: str = "",
     schedule_start: str = "",
+    has_scores: bool = False,
 ):
     # 試験日は (User)-[:PURSUES]->(Certification) に永続化する。
     # これが無いと次回以降の実行で資格間の期限を比較できない (EDF の前提)。
@@ -194,7 +201,13 @@ def ingestion_store_node(
     ctx.state["plan_kind"] = "initial"
     ctx.state["cert_id"] = cert_id
     ctx.state["cert_name"] = cert_profile.name if cert_profile else ""
-    return {"counts": counts, "targets": targets, "cert_id": cert_id}
+    # 登録の文面に模試の得点が混ざっていたら、そのまま採点処理へ回す。
+    # (シラバスと最新の模試を一度に貼るのは自然な使い方で、
+    #  登録だけ処理して得点を捨てると「反映されない」ように見える)
+    return Event(
+        output={"counts": counts, "targets": targets, "cert_id": cert_id},
+        route=bool(has_scores),
+    )
 
 
 @node(name="feedback_store")
@@ -205,6 +218,12 @@ def feedback_store_node(ctx, uid: str, feedback_output: FeedbackOutput):
     return {"assessment_id": assessment_id, "skills": len(feedback_output.per_skill)}
 
 
+@node(name="score_handoff")
+def score_handoff_node(ctx, user_input: str, attachment_b64: str = "", attachment_mime: str = ""):
+    """登録経路から模試抽出へ渡すための原文再送 (LLM ノードは直前の出力しか見ない)。"""
+    return _content_with_attachment(user_input, attachment_b64, attachment_mime)
+
+
 @node(name="weakness_detector")
 def weakness_node(ctx, assessment_id: str, uid: str, threshold: float = DEFAULT_THRESHOLD):
     # 注意: WorkflowState の Pydantic デフォルトは実行時 state に自動注入されない。
@@ -212,10 +231,13 @@ def weakness_node(ctx, assessment_id: str, uid: str, threshold: float = DEFAULT_
     # 省略可能なパラメータはここでデフォルトを持つ必要がある。
     result = detect_weakness(assessment_id, uid, threshold)
     ctx.state["weakness"] = result.model_dump()
-    ctx.state["target_skill_ids"] = result.cluster
-    ctx.state["plan_kind"] = "review"
-    # route=bool が BoolRoute。True なら planner、False なら report へ
-    return Event(output=result.model_dump(), route=result.has_weakness)
+    # 登録と同時に模試が来た場合、新規登録スキルと弱点クラスタの両方を計画対象にする
+    targets = sorted(set(ctx.state.get("target_skill_ids") or []) | set(result.cluster))
+    ctx.state["target_skill_ids"] = targets
+    if result.has_weakness:
+        ctx.state["plan_kind"] = "review"
+    # route=bool が BoolRoute。計画対象があれば planner、無ければ report へ
+    return Event(output=result.model_dump(), route=bool(targets))
 
 
 @node(name="planner")
@@ -323,7 +345,10 @@ def build_workflow(with_router: bool = True) -> Workflow:
                 },
             ),
             (feedback_agent, feedback_store_node, weakness_node),
-            (ingestion_orchestrator_node, ingestion_store_node, planner_node),
+            (ingestion_orchestrator_node, ingestion_store_node),
+            # 登録の文面に得点があれば模試処理へ合流、無ければそのまま計画へ
+            (ingestion_store_node, {True: score_handoff_node, False: planner_node}),
+            (score_handoff_node, feedback_agent),
             *branch,
         ]
     else:

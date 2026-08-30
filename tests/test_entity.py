@@ -75,3 +75,49 @@ def test_alias_lets_a_translated_name_resolve(weakness_graph):
         alias_keys=[match_key("test-w ロードバランシング")],
     )
     assert resolve_skill_id("test-w ロード バランシング") == sid
+
+
+# ---- 模試の分野名がシラバスより粗い場合 ----
+
+
+def test_question_count_is_not_part_of_the_skill_name():
+    """「Cloud DNS (4問)」はシラバスの「Cloud DNS」と同じスキル。"""
+    from app.workflow.sanitize import clean_name
+
+    variants = [
+        "Cloud DNS (4問)", "Cloud DNS（4問）", "Cloud DNS (4 questions)", "Cloud DNS(12題)",
+    ]
+    for raw in variants:
+        assert clean_name(raw) == "Cloud DNS"
+    assert clean_name("Cloud Run (v2)") == "Cloud Run (v2)"  # 出題数でない括弧は残す
+
+
+def test_coarse_domain_scores_every_service_it_lists(weakness_graph):
+    """模試の1分野が複数サービスを束ねている場合、その全部に配点する。"""
+    from app.workflow.entity import resolve_assessment_skills
+
+    nat = resolve_skill_id("test-w Cloud NAT")
+    proxy = resolve_skill_id("test-w Secure Web Proxy")
+    mirror = resolve_skill_id("test-w Packet Mirroring")
+
+    got = resolve_assessment_skills(
+        "test-w ネットワーク運用（test-w Cloud NAT・test-w Secure Web Proxy・"
+        "test-w Packet Mirroring）"
+    )
+    assert set(got) == {nat, proxy, mirror}
+
+
+def test_domain_matching_an_existing_skill_is_not_expanded(weakness_graph):
+    """分野名そのものが既存スキルなら、括弧の中身へは展開しない。"""
+    from app.workflow.entity import resolve_assessment_skills
+
+    sid = resolve_skill_id("test-w Cloud DNS")
+    assert resolve_assessment_skills("test-w Cloud DNS") == [sid]
+
+
+def test_unknown_domain_still_creates_one_skill(weakness_graph):
+    """どの既存スキルにも当たらない分野は、これまでどおり1件だけ作る。"""
+    from app.workflow.entity import resolve_assessment_skills
+
+    got = resolve_assessment_skills("test-w まったく新しい分野（未知A・未知B）")
+    assert len(got) == 1

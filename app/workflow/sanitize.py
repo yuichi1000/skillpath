@@ -20,10 +20,19 @@ MAX_PER_SKILL = 30
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
+# 模試の分野名に付いてくる出題数。スキル名の一部ではないので落とす。
+# これが残ると「Cloud DNS (4問)」がシラバスの「Cloud DNS」と別ノードになる。
+_QUESTION_COUNT = re.compile(
+    r"[\s　]*[（(]\s*\d+\s*(?:問|題|questions?|items?|qs?)\s*[)）][\s　]*$",
+    re.IGNORECASE,
+)
+
 
 def clean_name(value: str | None) -> str:
-    """制御文字を除去し、前後空白を落とし、最大長に切り詰める。"""
-    return _CONTROL_CHARS.sub("", value or "").strip()[:MAX_NAME_LEN]
+    """制御文字と末尾の出題数表記を除去し、前後空白を落として最大長に切り詰める。"""
+    name = _CONTROL_CHARS.sub("", value or "").strip()
+    name = _QUESTION_COUNT.sub("", name).strip()
+    return name[:MAX_NAME_LEN]
 
 
 def cap(items: list, limit: int, label: str) -> list:

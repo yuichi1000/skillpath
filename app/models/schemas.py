@@ -17,8 +17,9 @@ SessionKind = Literal["initial", "review"]
 class RouterOutput(BaseModel):
     intent: Intent
     deadline: str = ""  # 入力に試験日・目標日があれば ISO 日付 (YYYY-MM-DD)、無ければ空
+    start_date: str = ""  # 「来週から」等の学習開始希望日。無ければ空 (= 最速で開始)
 
-    @field_validator("deadline", mode="before")
+    @field_validator("deadline", "start_date", mode="before")
     @classmethod
     def _none_to_empty(cls, v):
         return v or ""

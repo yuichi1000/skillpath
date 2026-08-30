@@ -33,9 +33,31 @@ WHERE f.id IN $skill_ids AND t.id IN $skill_ids
 RETURN f.id AS source, t.id AS target, coalesce(r.strength, 1.0) AS strength;
 
 // -- name: graph_certs --
+// 資格ごとの表示情報。skill_ids は UI が資格でグラフを絞り込むために返す
 MATCH (c:Certification)-[:REQUIRES]->(s:Skill)
 WHERE s.id IN $skill_ids
-RETURN DISTINCT c.id AS id, c.name AS name, coalesce(c.vendor, '') AS vendor;
+OPTIONAL MATCH (u:User {uid: $uid})-[p:PURSUES]->(c)
+WITH c, p, collect(DISTINCT s.id) AS cert_skill_ids
+RETURN c.id                          AS id,
+       c.name                        AS name,
+       coalesce(c.vendor, '')        AS vendor,
+       coalesce(c.calendar_url, '')  AS calendar_url,
+       CASE WHEN p.deadline IS NULL THEN '' ELSE toString(p.deadline) END AS deadline,
+       cert_skill_ids                AS skill_ids;
+
+// -- name: graph_sessions --
+// 登録済みの学習ブロック。UI をリロードしても時間割が残るように /graph から返す
+MATCH (u:User {uid: $uid})-[:SCHEDULED]->(ls:LearningSession)-[:TARGETS]->(s:Skill)
+OPTIONAL MATCH (u)-[:PURSUES]->(c:Certification)-[:REQUIRES]->(s)
+WITH ls, s, collect(DISTINCT c.id) AS cert_ids
+RETURN ls.id                        AS id,
+       toString(ls.scheduled_at)    AS start,
+       ls.duration_min              AS duration_min,
+       coalesce(ls.kind, 'review')  AS kind,
+       s.id                         AS skill_id,
+       s.name                       AS skill_name,
+       cert_ids
+ORDER BY ls.scheduled_at;
 
 // -- name: graph_assessments --
 MATCH (:User {uid: $uid})-[:TOOK]->(a:Assessment)

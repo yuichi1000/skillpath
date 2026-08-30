@@ -117,8 +117,11 @@ def dispatch_node(
 ):
     # LLM の分類結果 (構造化出力で検証済み) を StringRoute に変換する決定的ノード。
     # 出力は「原文 + 添付」— 次の LLM ノード (feedback/ingestion) の入力になるため
-    if router_output.deadline:  # 空なら既存の設定 (state 直指定) を保持
+    # 明示指定 (API 引数) > 本文からの抽出 の優先順位。空なら既存の値を保持する
+    if router_output.deadline and not ctx.state.get("deadline"):
         ctx.state["deadline"] = router_output.deadline
+    if router_output.start_date and not ctx.state.get("schedule_start"):
+        ctx.state["schedule_start"] = router_output.start_date
     content = _content_with_attachment(user_input, attachment_b64, attachment_mime)
     return Event(output=content, route=router_output.intent)
 
@@ -174,11 +177,17 @@ def ingestion_store_node(
     threshold: float = DEFAULT_THRESHOLD,
     cert_profile: CertProfile | None = None,
     deadline: str = "",
+    schedule_start: str = "",
 ):
     # 試験日は (User)-[:PURSUES]->(Certification) に永続化する。
     # これが無いと次回以降の実行で資格間の期限を比較できない (EDF の前提)。
     counts, targets, cert_id = store_ingestion(
-        uid, ingestion_output, threshold, cert=cert_profile, deadline=deadline
+        uid,
+        ingestion_output,
+        threshold,
+        cert=cert_profile,
+        deadline=deadline,
+        start_date=schedule_start[:10],
     )
     ctx.state["ingestion_counts"] = counts
     ctx.state["target_skill_ids"] = targets
@@ -216,6 +225,21 @@ def planner_node(ctx, uid: str, target_skill_ids: list[str]):
     return result.model_dump()
 
 
+def _start_from(schedule_start: str) -> datetime:
+    """計画の起点を決める: 指定があればその日、無ければ今日 (= 翌日から配置)。
+
+    過去日の指定は今日に丸める (already-past な開始日で枠を無駄にしないため)。
+    """
+    now = datetime.now()
+    if not schedule_start:
+        return now
+    try:
+        start = datetime.fromisoformat(schedule_start)
+    except ValueError:
+        return now
+    return max(start, now)
+
+
 @node(name="scheduler")
 def scheduler_node(
     ctx, uid: str, plan: PlannerOutput, plan_kind: str,
@@ -230,7 +254,7 @@ def scheduler_node(
         uid=uid,
         plan=plan,
         kind=plan_kind,
-        start=datetime.fromisoformat(schedule_start) if schedule_start else datetime.now(),
+        start=_start_from(schedule_start),
         plan_key=plan_key,
         deadline=datetime.fromisoformat(deadline) if deadline else None,
         weakness=WeaknessOutput.model_validate(weakness) if weakness else None,

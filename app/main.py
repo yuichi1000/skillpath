@@ -142,7 +142,10 @@ async def graph(uid: str = Query(pattern=r"^[A-Za-z0-9_-]{1,64}$")) -> dict:
     return {
         "nodes": run_named("graph_view.cypher", "graph_nodes", uid=uid, skill_ids=skill_ids),
         "edges": run_named("graph_view.cypher", "graph_edges", skill_ids=skill_ids),
-        "certifications": run_named("graph_view.cypher", "graph_certs", skill_ids=skill_ids),
+        "certifications": run_named(
+            "graph_view.cypher", "graph_certs", uid=uid, skill_ids=skill_ids
+        ),
+        "sessions": run_named("graph_view.cypher", "graph_sessions", uid=uid),
         "assessments": run_named("graph_view.cypher", "graph_assessments", uid=uid),
     }
 

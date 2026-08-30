@@ -43,6 +43,38 @@
   #certLine { font-size: 12px; color: var(--ink-faint); }
   #certLine b { color: var(--ink); font-weight: 600; }
 
+  /* 資格の見出し (帳面の耳) */
+  #certTabs {
+    display: flex; align-items: stretch; gap: 2px; padding: 0 28px;
+    background: var(--paper-deep); border-bottom: 1px solid var(--rule); overflow-x: auto;
+  }
+  #certTabs button {
+    font: inherit; font-size: 12.5px; color: var(--ink-faint); background: none;
+    border: none; border-bottom: 2px solid transparent; cursor: pointer;
+    padding: 9px 16px; white-space: nowrap; letter-spacing: .04em;
+  }
+  #certTabs button:hover { color: var(--ink); }
+  #certTabs button.on {
+    color: var(--ink); font-weight: 600; background: var(--paper);
+    border-bottom-color: var(--shu);
+  }
+  #certTabs button .due { font-size: 11px; color: var(--ink-faint); margin-left: 7px; }
+  #certMeta {
+    padding: 7px 28px; font-size: 12px; color: var(--ink-faint);
+    border-bottom: 1px solid var(--rule); display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  #certMeta a { color: var(--ink); }
+
+  /* 日付欄 */
+  .dateRow { display: flex; gap: 12px; margin-top: 12px; }
+  .dateRow label { flex: 1; font-size: 11.5px; color: var(--ink-faint); letter-spacing: .1em; }
+  .dateRow input {
+    display: block; width: 100%; margin-top: 4px; font: inherit; font-size: 13px;
+    padding: 6px 8px; background: #fffdf7; border: 1px solid var(--rule); color: var(--ink);
+  }
+  .kind { font-size: 11px; padding: 1px 6px; border: 1px solid var(--rule); color: var(--ink-faint); }
+  .kind.review { border-color: var(--shu); color: var(--shu); }
+
   main { display: grid; grid-template-columns: 380px 1fr; gap: 0; min-height: calc(100vh - 60px); }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
 
@@ -171,6 +203,9 @@
   <div id="certLine"></div>
 </header>
 
+<nav id="certTabs" hidden></nav>
+<div id="certMeta" hidden></div>
+
 <main>
   <div id="inputPane">
     <div class="paneTitle">記入欄</div>
@@ -186,6 +221,13 @@
       <button data-sample="syllabus">記入例: シラバス登録</button>
       <button data-sample="exam1">記入例: 模試 一回目</button>
       <button data-sample="exam2">記入例: 模試 二回目(改善)</button>
+    </div>
+    <div class="dateRow">
+      <label>学習の開始日<input type="date" id="startDate"></label>
+      <label>試験日 (目標)<input type="date" id="examDate"></label>
+    </div>
+    <div class="paneNote" style="margin-top:6px">
+      未記入なら、本文から日付を読み取ります。それも無ければ最短で開始します。
     </div>
     <button id="runBtn">実 行</button>
     <div class="uidRow"><span>学習者:</span><input id="uid" value="demo-user"></div>
@@ -218,7 +260,7 @@
     </section>
 
     <section>
-      <h2>時間割 <span class="cap">カレンダーにも同じ内容を登録済み</span></h2>
+      <h2>時間割 <span class="cap">資格ごとの専用カレンダーに登録済み</span></h2>
       <div id="scheduleWrap"><div class="empty">まだ予定はありません。</div></div>
     </section>
 
@@ -319,6 +361,8 @@ $("#runBtn").addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         uid, message,
+        schedule_start: $("#startDate").value,
+        deadline: $("#examDate").value,
         attachment_b64: attachment ? attachment.b64 : "",
         attachment_mime: attachment ? attachment.mime : "",
       }),
@@ -358,26 +402,6 @@ function renderRun(d) {
         `<span class="min num">${p.estimated_minutes}分</span></li>`).join("")
     : `<li class="empty">計画対象はありませんでした。</li>`;
 
-  // 時間割
-  const ses = d.sessions || [];
-  if (ses.length) {
-    let prevDay = "";
-    const rows = ses.map(s => {
-      const st = new Date(s.start), en = new Date(s.end);
-      const day = `${st.getMonth()+1}/${st.getDate()}(${WEEKDAYS[st.getDay()]})`;
-      const cls = day !== prevDay && prevDay !== "" ? "newday" : "";
-      const dayCell = day !== prevDay ? day : "";
-      prevDay = day;
-      const nm = (d.plan?.plan || []).find(p => p.skill_id === s.skill_id);
-      return `<tr class="${cls}"><td class="day serif">${dayCell}</td>` +
-             `<td class="num">${hm(st)}–${hm(en)}</td><td>${esc(nm?.name || s.skill_id)}</td></tr>`;
-    }).join("");
-    $("#scheduleWrap").innerHTML =
-      `<table><thead><tr><th>日付</th><th>時刻</th><th>学習内容</th></tr></thead><tbody>${rows}</tbody></table>`;
-  } else {
-    $("#scheduleWrap").innerHTML = `<div class="empty">予定は作成されませんでした。</div>`;
-  }
-
   // 裏どり (公式情報の検索メモ)
   if (d.research_notes) {
     $("#researchSec").hidden = false;
@@ -394,20 +418,116 @@ function renderRun(d) {
 const hm = (t) => `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-// ---------- グラフ ----------
+// ---------- 帳面の状態 (資格の絞り込み) ----------
+const STATE = { graph: null, cert: "" };
+
+// Neo4j から返る日時は末尾 Z 付きだが中身はローカル時刻なので、そのまま解釈する
+const parseLocal = (v) => new Date(String(v).replace(/(Z|[+-]\d{2}:\d{2})$/, ""));
+
 async function loadGraph(uid) {
   const res = await fetch(`/graph?uid=${encodeURIComponent(uid)}`);
   if (!res.ok) return;
-  const g = await res.json();
-  renderCerts(g.certifications || []);
-  renderAssessments(g.assessments || []);
-  drawGraph(g);
+  STATE.graph = await res.json();
+  const certs = STATE.graph.certifications || [];
+  if (STATE.cert && !certs.some(c => c.id === STATE.cert)) STATE.cert = "";
+  renderCerts(certs);
+  renderAssessments(STATE.graph.assessments || []);
+  renderSchedule();
+  drawGraph(visibleGraph());
+}
+
+function activeCert() {
+  return (STATE.graph?.certifications || []).find(c => c.id === STATE.cert) || null;
+}
+
+/** 選択中の資格に属するスキルと、その前提を遡った範囲だけを残す。 */
+function visibleGraph() {
+  const g = STATE.graph || { nodes: [], edges: [] };
+  const cert = activeCert();
+  if (!cert) return g;
+  const keep = new Set(cert.skill_ids || []);
+  const bySource = {};
+  (g.edges || []).forEach(e => (bySource[e.target] ??= []).push(e.source));
+  const stack = [...keep];
+  while (stack.length) {  // 前提側へ遡る (資格が直接要求していない土台も残す)
+    for (const prev of bySource[stack.pop()] || []) {
+      if (!keep.has(prev)) { keep.add(prev); stack.push(prev); }
+    }
+  }
+  return {
+    nodes: (g.nodes || []).filter(n => keep.has(n.id)),
+    edges: (g.edges || []).filter(e => keep.has(e.source) && keep.has(e.target)),
+  };
 }
 
 function renderCerts(certs) {
   $("#certLine").innerHTML = certs.length
-    ? "対象資格: " + certs.map(c => `<b>${esc(c.name)}</b>`).join(" / ")
+    ? `${certs.length} 件の資格を並行`
     : "";
+  $("#certTabs").hidden = certs.length === 0;
+  $("#certMeta").hidden = true;
+  if (!certs.length) { $("#certTabs").innerHTML = ""; return; }
+
+  const tab = (id, label, due) =>
+    `<button data-cert="${esc(id)}" class="${STATE.cert === id ? "on" : ""}">` +
+    `${esc(label)}${due ? `<span class="due">${due}</span>` : ""}</button>`;
+  $("#certTabs").innerHTML =
+    tab("", "すべて", "") +
+    certs.map(c => tab(c.id, c.name, daysLeft(c.deadline))).join("");
+  $("#certTabs").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => {
+      STATE.cert = b.dataset.cert;
+      renderCerts(certs);
+      renderSchedule();
+      drawGraph(visibleGraph());
+    }));
+
+  const cert = activeCert();
+  if (cert) {
+    const bits = [];
+    if (cert.vendor) bits.push(esc(cert.vendor));
+    if (cert.deadline) bits.push(`試験日 ${esc(cert.deadline)}`);
+    bits.push(cert.calendar_url
+      ? `<a href="${esc(cert.calendar_url)}" target="_blank" rel="noopener">専用カレンダーを開く</a>`
+      : "専用カレンダーは次回の計画時に作成されます");
+    $("#certMeta").innerHTML = bits.map(b => `<span>${b}</span>`).join("");
+    $("#certMeta").hidden = false;
+  }
+}
+
+function daysLeft(deadline) {
+  if (!deadline) return "";
+  const d = Math.ceil((parseLocal(deadline) - new Date()) / 86400000);
+  return d >= 0 ? `あと${d}日` : "期限超過";
+}
+
+/** 時間割。/graph の登録済みブロックを正とするので、再読込しても消えない。 */
+function renderSchedule() {
+  const all = STATE.graph?.sessions || [];
+  const list = STATE.cert
+    ? all.filter(s => (s.cert_ids || []).includes(STATE.cert))
+    : all;
+  if (!list.length) {
+    $("#scheduleWrap").innerHTML = `<div class="empty">まだ予定はありません。</div>`;
+    return;
+  }
+  let prevDay = "";
+  const rows = list.map(s => {
+    const st = parseLocal(s.start);
+    const en = new Date(st.getTime() + (s.duration_min || 0) * 60000);
+    const day = `${st.getMonth() + 1}/${st.getDate()}(${WEEKDAYS[st.getDay()]})`;
+    const cls = day !== prevDay && prevDay !== "" ? "newday" : "";
+    const dayCell = day !== prevDay ? day : "";
+    prevDay = day;
+    const kind = s.kind === "review"
+      ? `<span class="kind review">復習</span>` : `<span class="kind">新規</span>`;
+    return `<tr class="${cls}"><td class="day serif">${dayCell}</td>` +
+           `<td class="num">${hm(st)}–${hm(en)}</td>` +
+           `<td>${esc(s.skill_name || s.skill_id)} ${kind}</td></tr>`;
+  }).join("");
+  $("#scheduleWrap").innerHTML =
+    `<table><thead><tr><th>日付</th><th>時刻</th><th>学習内容</th></tr></thead>` +
+    `<tbody>${rows}</tbody></table>`;
 }
 
 function classify(nodes, edges) {

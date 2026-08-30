@@ -43,6 +43,11 @@ MATCH (c:Certification {id: 'demo-cert-gkentei'}), (s:Skill {id: sid})
 MERGE (c)-[r:REQUIRES]->(s)
   SET r.weight = 1.0;
 
+// 受験予定 (試験日は受験者ごとに違うのでユーザー側のエッジに持たせる)
+MATCH (u:User {uid: 'demo-user'}), (c:Certification {id: 'demo-cert-gkentei'})
+MERGE (u)-[p:PURSUES]->(c)
+  SET p.deadline = date('2026-11-15');
+
 UNWIND [
   {id: 'demo-book-zero', title: 'ゼロから作るDeep Learning(デモ)', type: 'book', hours: 30},
   {id: 'demo-book-text', title: 'G検定公式テキスト(デモ)',          type: 'book', hours: 25}

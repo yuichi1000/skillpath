@@ -126,7 +126,7 @@ resource "google_cloud_run_v2_service_iam_member" "pubsub_invoker" {
   member   = "serviceAccount:${var.pubsub_invoker_sa_email}"
 }
 
-# 審査員・デモ用の公開アクセス (組織ポリシーで拒否されたら変数で false に)
+# 未認証公開。IAP で保護する場合は false のままにする
 resource "google_cloud_run_v2_service_iam_member" "public" {
   count = var.allow_unauthenticated ? 1 : 0
 
@@ -134,4 +134,36 @@ resource "google_cloud_run_v2_service_iam_member" "public" {
   location = var.region
   role     = "roles/run.invoker"
   member   = "allUsers"
+}
+
+# --- Identity-Aware Proxy ---
+# サービスの前段に IAP を置き、指定した Google アカウントだけを通す。
+# IAP 自身がサービスを呼ぶため、IAP サービスエージェントに invoker が要る。
+#
+# 有効化そのものは provider 6.x が未対応 (iap_enabled 引数が無い) のため、
+# 一度だけ次のコマンドで行う。Terraform は権限側だけを管理する:
+#   gcloud services enable iap.googleapis.com
+#   gcloud beta run services update skillpath-workflow --region=<region> --iap
+# 解除する場合は --no-iap と allow_unauthenticated=true。
+data "google_project" "this" {
+  project_id = var.project_id
+}
+
+resource "google_cloud_run_v2_service_iam_member" "iap_agent" {
+  count = length(var.iap_members) > 0 ? 1 : 0
+
+  name     = google_cloud_run_v2_service.workflow.name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-iap.iam.gserviceaccount.com"
+}
+
+resource "google_iap_web_cloud_run_service_iam_member" "accessor" {
+  for_each = toset(var.iap_members)
+
+  project                = var.project_id
+  location               = var.region
+  cloud_run_service_name = google_cloud_run_v2_service.workflow.name
+  role                   = "roles/iap.httpsResourceAccessor"
+  member                 = each.value
 }

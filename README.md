@@ -3,6 +3,7 @@
 **All Things Agentic Hackathon · Track: The Taskmaster**
 
 **Live service → https://skillpath-workflow-924686405565.asia-northeast1.run.app**
+*(behind Identity-Aware Proxy — sign in with the demo account shared in the submission)*
 
 SkillPath answers "what should I study, in what order, and when?" and then *acts* on the
 answer. Paste a certification syllabus and it researches the official exam guide, builds a
@@ -37,8 +38,9 @@ the scheduler fits them into your genuinely free evenings, earliest-deadline-fir
 
 ## Try it in two minutes
 
-Open **https://skillpath-workflow-924686405565.asia-northeast1.run.app** — the study ledger
-loads with a seeded demo learner. Three sample inputs are one click away in the left pane.
+Open **https://skillpath-workflow-924686405565.asia-northeast1.run.app** and sign in with the
+demo Google account given in the submission — the service sits behind Identity-Aware Proxy, so
+only that account can reach it. Three sample inputs are one click away in the left pane.
 
 1. **Register** — click *記入例: 資格の登録*, then **実行**. Watch the knowledge graph
    appear and a new certification tab arrive in the header.
@@ -61,8 +63,9 @@ curl -s -X POST $URL/run -H 'Content-Type: application/json' -d '{
 The response carries the weakness cluster, the ordered plan, the scheduled blocks, a
 deadline-fit verdict, and the link to each certification's calendar.
 
-> The demo learner is fixed to `uid=demo-user` by an allowlist, so judges can explore freely
-> without touching anyone else's graph or calendar.
+> Two layers keep the demo contained: IAP admits only the shared demo account, and inside the
+> app an allowlist pins every request to `uid=demo-user`, so exploring cannot touch anyone
+> else's graph or calendar. The API examples below need an IAP token; the browser flow does not.
 
 ---
 
@@ -142,7 +145,7 @@ effect — the same layer the architecture is built around.
 | **Structure** | Extractor output must satisfy typed Pydantic schemas before any write. Nulls, unknown enum values and out-of-range numbers are coerced; only the structure and the entity-resolution keys are strict, so a slightly wrong model does not fail the run. |
 | **Volume** | Per request: ≤80 skills, ≤20 resources, ≤100 edges, ≤30 scores. Names are stripped of control characters and truncated. A "generate 1000 skills" injection cannot flood the graph. |
 | **Time** | A future exam date can never become an assessment timestamp — the deterministic `safe_taken_at` guard, added after the prompt-only fix proved insufficient. |
-| **Access** | `/admin/*` requires `X-Admin-Token` and is closed by default. `/run` validates uid format, caps the message at 8k characters, enforces an `ALLOWED_UIDS` allowlist, and rate-limits per minute. Attachments are restricted to PNG/JPEG/WebP/PDF and about 5 MB. |
+| **Access** | The service is fronted by Identity-Aware Proxy: unauthenticated requests never reach the container (302 to Google sign-in, 401 for API calls), and only principals holding `roles/iap.httpsResourceAccessor` are admitted. Behind it, `/admin/*` requires `X-Admin-Token` and is closed by default; `/run` validates uid format, caps the message at 8k characters, enforces an `ALLOWED_UIDS` allowlist, and rate-limits per minute. Attachments are restricted to PNG/JPEG/WebP/PDF and about 5 MB. |
 | **Failure** | LLM nodes retry transient errors with exponential backoff; a calendar outage degrades to placeholder slots with a warning rather than failing the workflow; LLM errors surface as a structured 502, never a stack trace. |
 | **Isolation** | Every user-scoped Cypher query filters by `uid`. Neo4j has no public IP; Cloud Run reaches it over direct VPC egress. |
 | **Scope** | A request that is not about studying for an exam, or one the app should not help with — obtaining leaked exam content, attacking someone, harvesting another person's data — is declined at the router and reaches a terminal node that touches neither the database nor the calendar. The judgement is deliberately placed where being wrong can only refuse. |
@@ -151,8 +154,9 @@ effect — the same layer the architecture is built around.
 Pasted text — syllabi, papers, exam results — is data, never instruction. Every prompt says
 so, and every cap enforces it regardless.
 
-**Honest limits.** There is no end-user authentication binding a `uid` to a caller; the
-allowlist stands in for it. The rate limiter is per Cloud Run instance, not distributed.
+**Honest limits.** IAP authenticates the caller, but the app does not yet bind that identity to
+the `uid` it operates on — the allowlist stands in for it, which is why the deployment pins a
+single uid. The rate limiter is per Cloud Run instance, not distributed.
 Sharing a certification calendar publicly is left to its owner — SkillPath creates the
 calendar but deliberately writes no ACL.
 
@@ -231,6 +235,11 @@ cd infra && terraform apply -var project_id=$PROJECT_ID \
 
 URL=$(terraform output -raw workflow_url)
 TOKEN=$(gcloud secrets versions access latest --secret=skillpath-admin-token)
+
+# IAP is enabled once by hand (the provider has no argument for it); Terraform owns the
+# access bindings, so `iap_members` is what decides who gets in.
+gcloud services enable iap.googleapis.com
+gcloud beta run services update skillpath-workflow --region=$REGION --iap
 curl -X POST $URL/admin/init-schema -H "X-Admin-Token: $TOKEN"
 curl -X POST $URL/admin/seed-demo   -H "X-Admin-Token: $TOKEN"
 ```

@@ -96,4 +96,5 @@ module "cloudrun" {
   gemini_model_extract     = var.gemini_model_extract
   upload_bucket_name       = module.data.upload_bucket_name
   allow_unauthenticated    = var.allow_unauthenticated
+  iap_members              = var.iap_members
 }

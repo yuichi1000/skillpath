@@ -52,7 +52,16 @@ variable "container_image" {
 }
 
 variable "allow_unauthenticated" {
-  description = "Cloud Run を未認証公開するか (審査員アクセス用)"
+  description = "Cloud Run を未認証公開するか。IAP で保護しているため既定は false"
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "iap_members" {
+  description = <<-EOT
+    IAP 経由でアプリにアクセスできる主体 ("user:foo@example.com" 形式)。
+    空にすると誰もアクセスできなくなるので注意。
+  EOT
+  type        = list(string)
+  default     = ["user:skillpath.demo@gmail.com"]
 }

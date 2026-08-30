@@ -50,6 +50,11 @@ variable "allow_unauthenticated" {
   type = bool
 }
 
+variable "iap_members" {
+  type    = list(string)
+  default = []
+}
+
 variable "allowed_uids" {
   type    = string
   default = "demo-user"

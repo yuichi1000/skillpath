@@ -34,10 +34,14 @@ MERGE (s:Skill {id: sk.id})
                 s.domain = sk.domain,
                 s.created_at = datetime()
   ON MATCH  SET s.description = coalesce(sk.description, s.description),
-                s.estimated_hours = coalesce(s.estimated_hours, sk.estimated_hours),
                 s.updated_at = datetime()
+  // 名寄せで先にノードが作られていると ON CREATE は発火しないので、
+  // 索引と分類は毎回明示的に入れ直す (domain が空だと網羅性を検証できない)
   SET s.match_key = sk.match_key,
-      s.alias_keys = sk.alias_keys;
+      s.alias_keys = sk.alias_keys,
+      s.name = sk.name,
+      s.domain = CASE WHEN sk.domain = '' THEN s.domain ELSE sk.domain END,
+      s.estimated_hours = coalesce(sk.estimated_hours, s.estimated_hours);
 
 // -- name: merge_prerequisites --
 UNWIND $prerequisites AS p

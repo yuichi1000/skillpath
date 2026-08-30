@@ -151,3 +151,23 @@ async def test_full_flow_from_pasted_syllabus(weakness_graph):
     # 初期計画がスケジュールまで到達している
     assert "初期学習計画" in state["summary"]
     assert "📅 学習スケジュール" in state["summary"]
+
+
+def test_domain_is_stored_even_when_the_node_already_exists(weakness_graph):
+    """公式セクション名 (domain) がノードに残る。
+
+    名寄せが先にノードを作るため MERGE の ON CREATE は発火しない。
+    ここが漏れると出題範囲の網羅性をグラフから検証できなくなる。
+    """
+    from app.models.schemas import IngestionOutput, SkillIn
+    from app.tools.neo4j_tool import run_query
+
+    out = IngestionOutput(
+        skills=[SkillIn(name="test-w 負荷分散", domain="セクション3: マネージドサービス")]
+    )
+    store_ingestion("test-w-user", out, threshold=0.6)
+    rows = run_query(
+        "MATCH (s:Skill) WHERE s.match_key = $k RETURN s.domain AS d",
+        k="testw負荷分散",
+    )
+    assert rows[0]["d"] == "セクション3: マネージドサービス"

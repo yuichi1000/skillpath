@@ -60,3 +60,18 @@ def test_short_substring_does_not_over_merge(weakness_graph):
     """短い語が長い名前に埋もれているだけの場合は、別スキルのまま。"""
     long_id = resolve_skill_id("test-w VPC設計とIPアドレス管理の実務")
     assert resolve_skill_id("test-w VPC") != long_id
+
+
+def test_alias_lets_a_translated_name_resolve(weakness_graph):
+    """英語名で登録されたスキルに、日本語の模試分野名が寄る (別表記の索引経由)。"""
+    from app.tools.neo4j_tool import run_named
+    from app.workflow.entity import slugify
+
+    sid = f"skill-{slugify('test-w Cloud Load Balancing')}"
+    run_named(
+        "ingestion.cypher", "create_skill_if_absent",
+        id=sid, name="test-w Cloud Load Balancing",
+        key=match_key("test-w Cloud Load Balancing"),
+        alias_keys=[match_key("test-w ロードバランシング")],
+    )
+    assert resolve_skill_id("test-w ロード バランシング") == sid

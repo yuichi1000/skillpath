@@ -84,7 +84,7 @@ def _validate_iso(value: str) -> str:
 
 
 ALLOWED_ATTACHMENT_MIMES = {"image/png", "image/jpeg", "image/webp", "application/pdf"}
-MAX_ATTACHMENT_B64 = 7_200_000  # base64 で約 5.4MB (バイナリ 4MB 相当)
+MAX_ATTACHMENT_B64 = 7_200_000  # base64 文字数。バイナリ約 5.4MB 相当
 
 
 class RunRequest(BaseModel):

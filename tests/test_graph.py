@@ -52,3 +52,29 @@ async def test_deadline_from_state_limits_schedule(weakness_graph):
     assert all(s["end"] < "2026-09-03" for s in sessions)
     assert "🎯 目標期限: 2026-09-03" in state["summary"]
     assert "✅ 計画は期限内に無理なく収まっています" in state["summary"]
+
+
+def test_full_workflow_including_llm_nodes_actually_builds():
+    """LLM ノードを含む本番と同じグラフが構築できること。
+
+    ほとんどのテストは with_router=False の決定的グラフしか組まないため、
+    ルーティング表の誤り (同じ分岐先への重複エッジなど) が本番の /run で
+    初めて 500 として現れた。構築はネットワークを使わないので高速テストに置く。
+    """
+    from app.workflow.graph import build_workflow
+
+    wf = build_workflow(with_router=True)
+    assert wf.name == "skillpath"
+
+
+def test_decline_route_is_reachable_from_dispatch():
+    """断る意図が分岐表に載っていること (載っていなければ実行時に落ちる)。"""
+    import inspect
+    from typing import get_args
+
+    from app.models.schemas import Intent
+    from app.workflow import graph as gmod
+
+    src = inspect.getsource(gmod)
+    routed = {k for k in get_args(Intent) if f'"{k}":' in src}
+    assert routed == set(get_args(Intent)), f"分岐表に無い意図: {set(get_args(Intent)) - routed}"

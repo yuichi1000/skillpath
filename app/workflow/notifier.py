@@ -68,11 +68,11 @@ def build_summary(
     return "\n".join(lines)
 
 
-def build_decline_report(intent: str, reason: str) -> str:
+def build_decline_report(refusal: str, reason: str) -> str:
     """範囲外・不適切な依頼を断るときの文面。何が起きたかを曖昧にしない。"""
     head = (
         "この依頼には応じられません。"
-        if intent == "unsafe"
+        if refusal == "unsafe"
         else "この入力は SkillPath の扱う範囲ではないため、何も記録していません。"
     )
     body = f"\n\n理由: {reason}" if reason else ""

@@ -250,9 +250,9 @@ def decline_node(ctx, router_output: RouterOutput):
     誤判定した場合の影響は「断ってしまう」側にしか出ない (fail-safe)。
     """
     ctx.state["summary"] = notifier_mod.build_decline_report(
-        router_output.intent, router_output.reason
+        router_output.refusal, router_output.reason
     )
-    logger.info("依頼を辞退: intent=%s reason=%r", router_output.intent, router_output.reason)
+    logger.info("依頼を辞退: refusal=%s reason=%r", router_output.refusal, router_output.reason)
     return ctx.state["summary"]
 
 
@@ -385,8 +385,7 @@ def build_workflow(with_router: bool = True) -> Workflow:
                     "assessment": feedback_agent,
                     "register": ingestion_orchestrator_node,
                     "query": query_node,
-                    "unrelated": decline_node,
-                    "unsafe": decline_node,
+                    "declined": decline_node,
                 },
             ),
             (feedback_agent, feedback_store_node, weakness_node),

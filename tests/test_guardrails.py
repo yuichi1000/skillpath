@@ -198,8 +198,7 @@ def test_decline_intents_are_wired_to_a_terminal_node():
     from app.workflow import graph as gmod
 
     src = inspect.getsource(gmod)
-    assert '"unrelated": decline_node' in src
-    assert '"unsafe": decline_node' in src
+    assert '"declined": decline_node' in src
     # decline は state の summary しか触らない (DB・カレンダーに触れない)
     body = src[src.index("def decline_node("):]
     body = body[: body.index("@node(", 1)]
@@ -217,7 +216,7 @@ async def test_off_topic_request_is_declined_without_writing(weakness_graph):
         with_router=True,
         message=MOCK_OFF_TOPIC,
     )
-    assert state["router_output"]["intent"] in ("unrelated", "unsafe")
+    assert state["router_output"]["intent"] == "declined"
     assert not state.get("sessions")
     assert not state.get("ingestion_counts")
 
@@ -235,5 +234,6 @@ async def test_request_to_obtain_leaked_exam_content_is_refused(weakness_graph):
         with_router=True,
         message=MOCK_CHEATING,
     )
-    assert state["router_output"]["intent"] == "unsafe"
+    assert state["router_output"]["intent"] == "declined"
+    assert state["router_output"]["refusal"] == "unsafe"
     assert not state.get("sessions")

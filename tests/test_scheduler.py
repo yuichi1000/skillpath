@@ -85,7 +85,7 @@ def test_deadline_compresses_the_plan_instead_of_cutting_it():
     )
     assert all(s.end <= datetime(2026, 9, 3) for s in sessions)
     assert _minutes(sessions, "nn") == 240  # 期限前の枠を使い切る
-    assert any("圧縮して" in w for w in warnings)
+    assert any("圧縮しました" in w for w in warnings)
     assert any("1日あたり" in w for w in warnings)
 
 
@@ -267,7 +267,7 @@ def test_plan_is_compressed_rather_than_truncated_at_the_deadline():
     sessions, warnings = allocate_groups([group], _slots(6))
     # 圧縮前なら 6 スキルで枠が尽きる。圧縮によりほぼ全範囲が計画に入る
     assert len({s.skill_id for s in sessions}) >= 9
-    assert any("圧縮して" in w for w in warnings)
+    assert any("圧縮しました" in w for w in warnings)
     # 入りきらなかった分は、どのスキルが何時間足りないかまで伝える
     if len({s.skill_id for s in sessions}) < 10:
         assert any("計画に入れられませんでした" in w for w in warnings)
@@ -299,3 +299,20 @@ def test_plan_within_the_deadline_is_left_alone():
     sessions, warnings = allocate_groups([group], _slots(10))
     assert sum(int((s.end - s.start).total_seconds() // 60) for s in sessions) == 120
     assert not any("圧縮" in w for w in warnings)
+
+
+def test_tiny_leftover_does_not_burn_the_remaining_slots():
+    """15分未満の端数を抱えたまま枠を飛ばし続け、以降が全滅しないこと。
+
+    本番で 19 スキル中 14 スキルが未配置になった原因。端数は切り捨てて
+    次のスキルへ進む。
+    """
+    slots = [day_slot(d, 20, 22) for d in range(27)]
+    plan = plan_of(*[(f"s{i}", 165) for i in range(19)])  # 165分は端数が出る長さ
+    sessions, warnings = allocate_sessions(
+        plan, slots, plan_key="a1", deadline=datetime(2026, 9, 27)
+    )
+    assert len({s.skill_id for s in sessions}) == 19  # 全スキルに時間が割り当たる
+    used = sum(int((s.end - s.start).total_seconds() // 60) for s in sessions)
+    assert used > 0.93 * 27 * 120  # 空き枠をほぼ使い切る (端数の切り捨てぶんのみ残る)
+    assert max(s.start for s in sessions).day >= 25  # 期限直前まで計画が伸びる

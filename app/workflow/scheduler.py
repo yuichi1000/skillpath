@@ -124,7 +124,10 @@ def allocate_groups(
                 break
             remaining = item.estimated_minutes
             block_no = 1
-            while remaining > 0:
+            # 端数が MIN_TAIL 未満になったらそのスキルは完了扱い。
+            # 置けない端数を抱えたまま回すと、残りの枠を延々と飛ばして
+            # 以降のスキルが丸ごと未配置になる。
+            while remaining >= MIN_TAIL_MINUTES:
                 if slot_i >= len(free_slots):
                     exhausted = True
                     break
@@ -137,7 +140,7 @@ def allocate_groups(
                 limit = min(slot_end, group.deadline) if group.deadline else slot_end
                 space = int((limit - start).total_seconds() // 60)
                 take = min(remaining, config.max_block_minutes, space)
-                if take < min(config.min_block_minutes, remaining) or take < MIN_TAIL_MINUTES:
+                if take < min(config.min_block_minutes, remaining):
                     slot_i += 1  # この枠の残りは短すぎる
                     cursor = None
                     continue
@@ -155,7 +158,7 @@ def allocate_groups(
                 cursor = start + timedelta(minutes=take)
                 remaining -= take
                 block_no += 1
-            if remaining > 0:
+            if remaining >= MIN_TAIL_MINUTES:
                 unplaced.append(item)
 
         if unplaced:
@@ -210,7 +213,7 @@ def _fit_to_deadline(
     warnings = [
         f"{label}全範囲を {group.deadline:%Y-%m-%d} までに一周するには約 {required / 60:.0f} 時間"
         f"必要ですが、空き時間から確保できるのは約 {capacity / 60:.0f} 時間です。"
-        f"各スキルの配分を {scale:.0%} に圧縮して {len(scaled)} スキル全てを計画しました"
+        f"範囲を削らずに一周させるため、各スキルの配分を {scale:.0%} に圧縮しました"
     ]
     if after > capacity:
         warnings.append(

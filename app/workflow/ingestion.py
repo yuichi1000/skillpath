@@ -19,7 +19,13 @@ from app.config import get_settings
 from app.models.schemas import CertProfile, IngestionOutput
 from app.tools.neo4j_tool import run_named
 from app.workflow import sanitize
-from app.workflow.entity import ensure_user, match_key, resolve_skill_id, slugify
+from app.workflow.entity import (
+    candidate_names,
+    ensure_user,
+    match_key,
+    resolve_skill_id,
+    slugify,
+)
 
 INGESTION_OUTPUT_KEY = "ingestion_output"
 CERT_PROFILE_KEY = "cert_profile"
@@ -201,7 +207,14 @@ def store_ingestion(
                 "id": real_id,
                 "name": name,
                 "match_key": match_key(name),
-                "alias_keys": sorted({match_key(a) for a in aliases if match_key(a)}),
+                # LLM が挙げた別表記に加えて、名前自体から機械的に切り出した
+                # 候補 (括弧の中身・区切りで分けた語) も索引に入れる。
+                # 「負荷分散（ロード バランシング）の構成」に模試の「ロード バランシング」
+                # が当たるようにするため。短すぎる語は誤爆するので除く。
+                "alias_keys": sorted(
+                    {match_key(a) for a in aliases if match_key(a)}
+                    | {k for c in candidate_names(name) if len(k := match_key(c)) >= 4}
+                ),
             }
         )
 

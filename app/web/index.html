@@ -347,6 +347,13 @@ $("#runBtn").addEventListener("click", async () => {
   if (!message && attachment) message = "添付の内容を解析してください。";
   if (!message) { setStatus("記入欄が空です。", true); return; }
 
+  // 前回の実行結果を残したまま走らせると、途中経過と混同される
+  $("#planList").innerHTML = `<li class="empty">エージェントが計画を作成しています…</li>`;
+  $("#summaryBox").textContent = "";
+  $("#summaryBox").classList.add("empty");
+  $("#warnBox").innerHTML = "";
+  $("#researchSec").hidden = true;
+
   const btns = document.querySelectorAll("button");
   btns.forEach(b => b.disabled = true);
   const t0 = Date.now();

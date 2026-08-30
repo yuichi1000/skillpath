@@ -121,3 +121,24 @@ def test_unknown_domain_still_creates_one_skill(weakness_graph):
 
     got = resolve_assessment_skills("test-w まったく新しい分野（未知A・未知B）")
     assert len(got) == 1
+
+
+def test_parenthetical_inside_a_syllabus_name_is_indexed_as_an_alias(weakness_graph):
+    """シラバス側が冗長な名前でも、模試側の短い分野名が当たる。
+
+    「負荷分散（ロード バランシング）の構成」と「ロード バランシング」は
+    長さ比 0.56 で包含判定を通らないため、括弧の中身を別表記として索引する。
+    """
+    from app.models.schemas import IngestionOutput, SkillIn
+    from app.workflow.entity import resolve_assessment_skills
+    from app.workflow.ingestion import store_ingestion
+
+    store_ingestion(
+        "test-w-user",
+        IngestionOutput(skills=[SkillIn(name="test-w 負荷分散（ロード バランシング）の構成")]),
+        threshold=0.6,
+    )
+    from app.workflow.entity import slugify
+
+    expected = f"skill-{slugify('test-w 負荷分散（ロード バランシング）の構成')}"
+    assert resolve_assessment_skills("ロード バランシング") == [expected]

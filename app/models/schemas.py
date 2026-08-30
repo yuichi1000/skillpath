@@ -13,7 +13,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # fail-safe (書き込みが起きない側) なので安全側に倒れる。
 # 断る理由の種別は refusal で持つ (ADK は同じ分岐先へ複数のエッジを張れない)。
 Intent = Literal["register", "assessment", "query", "declined"]
-Refusal = Literal["", "unrelated", "unsafe"]
+# Gemini の response_schema は空文字を enum 値として受け付けないため、
+# 「該当なし」も明示的な値 ("none") で表す。Literal に "" を入れてはいけない。
+Refusal = Literal["none", "unrelated", "unsafe"]
 Depth = Literal["intro", "standard", "deep"]
 SessionKind = Literal["initial", "review"]
 
@@ -23,13 +25,13 @@ class RouterOutput(BaseModel):
     deadline: str = ""  # 入力に試験日・目標日があれば ISO 日付 (YYYY-MM-DD)、無ければ空
     start_date: str = ""  # 「来週から」等の学習開始希望日。無ければ空 (= 最速で開始)
     has_scores: bool = False  # 本文に採点済みの得点が含まれるか (登録と同時投入されうる)
-    refusal: Refusal = ""  # declined の内訳: 範囲外か、応じるべきでないか
+    refusal: Refusal = "none"  # declined の内訳: 範囲外か、応じるべきでないか
     reason: str = ""  # declined と判定した場合の、利用者に示す短い理由
 
     @field_validator("refusal", mode="before")
     @classmethod
     def _refusal_default(cls, v):
-        return v if v in ("unrelated", "unsafe") else ""
+        return v if v in ("unrelated", "unsafe") else "none"
 
     @field_validator("reason", mode="before")
     @classmethod

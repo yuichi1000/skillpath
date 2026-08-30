@@ -43,3 +43,33 @@ async def test_query_intent_goes_to_stub(weakness_graph):
     )
     assert state["router_output"]["intent"] == "query"
     assert "未実装" in state["summary"]
+
+
+def test_output_schemas_have_no_empty_enum_values():
+    """LLM に渡す JSON スキーマに空文字の enum を入れない。
+
+    Gemini は response_schema の enum に空文字があると 400 を返す
+    (本番で refusal="" がこれに当たった)。全 LLM ノードの出力スキーマを見張る。
+    """
+    from app.models.schemas import (
+        CertProfile,
+        FeedbackOutput,
+        IngestionOutput,
+        RouterOutput,
+    )
+
+    def enums(schema: dict) -> list[list]:
+        found = []
+        if isinstance(schema, dict):
+            if "enum" in schema:
+                found.append(schema["enum"])
+            for value in schema.values():
+                found += enums(value)
+        elif isinstance(schema, list):
+            for item in schema:
+                found += enums(item)
+        return found
+
+    for model in (RouterOutput, CertProfile, FeedbackOutput, IngestionOutput):
+        for values in enums(model.model_json_schema()):
+            assert "" not in values, f"{model.__name__} の enum に空文字がある: {values}"

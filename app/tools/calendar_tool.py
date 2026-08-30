@@ -136,10 +136,19 @@ def _is_declined(ev: dict) -> bool:
     )
 
 
+MAX_EVENT_PAGES = 40  # 250件/ページ × 40 = 1万件。学習ブロックの現実的な上限を超える
+
+
 def _iter_events(calendar_id: str, time_min: datetime, time_max: datetime):
+    """指定期間のイベントを列挙する。
+
+    ページングは API が返す nextPageToken に従うが、同じトークンが返ってきたり
+    ページ数が想定を超えた場合は打ち切る (外部 API に無限に付き合わない)。
+    """
     service = get_service()
     page_token = None
-    while True:
+    seen_tokens: set[str] = set()
+    for _page in range(MAX_EVENT_PAGES):
         resp = (
             service.events()
             .list(
@@ -154,8 +163,13 @@ def _iter_events(calendar_id: str, time_min: datetime, time_max: datetime):
         )
         yield from resp.get("items", [])
         page_token = resp.get("nextPageToken")
-        if not page_token:
+        if not page_token or page_token in seen_tokens:
             break
+        seen_tokens.add(page_token)
+    else:
+        logger.warning(
+            "カレンダー %s のイベント列挙を %d ページで打ち切りました", calendar_id, MAX_EVENT_PAGES
+        )
 
 
 def get_busy(

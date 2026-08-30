@@ -59,7 +59,18 @@ def topological_sort(nodes: list[SkillNode]) -> tuple[list[str], list[str]]:
     ordered: list[str] = []
     warnings: list[str] = []
     remaining = set(ids)
+    # 1周ごとに「ノードが減る」か「エッジが1本減る」ので、その総数が反復の上限。
+    # 不変条件が崩れても回り続けないよう明示的に打ち切る。
+    budget = len(ids) + sum(len(d) for d in deps.values()) + 1
     while remaining:
+        budget -= 1
+        if budget < 0:
+            warnings.append(
+                f"依存関係の解消が収束しなかったため、残り {len(remaining)} スキルを"
+                "ID 順で並べました"
+            )
+            ordered.extend(sorted(remaining))
+            break
         ready = sorted(i for i in remaining if not (deps[i].keys() & remaining))
         if not ready:
             # 循環: strength 最小のエッジを切る (同率は id 順で決定的に)

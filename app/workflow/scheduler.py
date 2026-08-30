@@ -29,6 +29,14 @@ class ScheduleConfig:
     max_block_minutes: int = 90
     min_block_minutes: int = 30
 
+    def __post_init__(self) -> None:
+        # 0 や負の値を許すと「1回で1分も進まない」状態になり、割り当てが停止しない。
+        # 設定ミスは黙って回り続けるより、その場で落とす。
+        if self.min_block_minutes < 1:
+            raise ValueError("min_block_minutes は 1 以上である必要があります")
+        if self.max_block_minutes < self.min_block_minutes:
+            raise ValueError("max_block_minutes は min_block_minutes 以上である必要があります")
+
 
 def _split_into_blocks(
     plan: PlannerOutput, config: ScheduleConfig
@@ -43,7 +51,7 @@ def _split_into_blocks(
         remaining = item.estimated_minutes
         block_no = 1
         while remaining > 0:
-            duration = min(config.max_block_minutes, remaining)
+            duration = max(1, min(config.max_block_minutes, remaining))  # 必ず前進する
             remaining -= duration
             blocks.append(
                 (
@@ -140,8 +148,10 @@ def allocate_groups(
                 limit = min(slot_end, group.deadline) if group.deadline else slot_end
                 space = int((limit - start).total_seconds() // 60)
                 take = min(remaining, config.max_block_minutes, space)
-                if take < min(config.min_block_minutes, remaining):
-                    slot_i += 1  # この枠の残りは短すぎる
+                if take <= 0 or take < min(config.min_block_minutes, remaining):
+                    # この枠の残りは短すぎる。take<=0 を弾かないと remaining も
+                    # slot_i も動かないまま回り続ける
+                    slot_i += 1
                     cursor = None
                     continue
                 sessions.append(

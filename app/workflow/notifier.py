@@ -16,6 +16,7 @@ def build_summary(
     weakness: WeaknessOutput | None = None,
     kind: str = "review",
     deadline: str = "",
+    calendar_links: dict[str, str] | None = None,
 ) -> str:
     names = {item.skill_id: item.name or item.skill_id for item in plan.plan}
 
@@ -47,6 +48,12 @@ def build_summary(
                 f"  {s.start:%m/%d}({wd}) {s.start:%H:%M}-{s.end:%H:%M}"
                 f" {names.get(s.skill_id, s.skill_id)}"
             )
+    if calendar_links:
+        lines.append("")
+        lines.append("🗓 資格ごとの専用カレンダーに登録しました:")
+        for url in calendar_links.values():
+            lines.append(f"  {url}")
+        lines.append("  (共有するには Google カレンダーの設定で公開してください)")
     if deadline and sessions and not schedule_warnings:
         lines.append("✅ 計画は期限内に収まっています")
     for w in schedule_warnings or []:

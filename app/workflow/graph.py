@@ -81,6 +81,7 @@ class WorkflowState(BaseModel):
     sessions: list[SessionDraft] = Field(default_factory=list)
     schedule_warnings: list[str] = Field(default_factory=list)
     calendar_synced: bool = False
+    calendar_links: dict = Field(default_factory=dict)  # 資格ID → カレンダー公開URL
     summary: str = ""
 
 
@@ -225,7 +226,7 @@ def scheduler_node(
     # plan_key に資格を含める: 含めないと資格をまたぐ共有スキルの session_id が
     # 衝突し、先に立てた予定が上書きされてしまう
     plan_key = ctx.state.get("assessment_id") or f"{uid}-{cert_id or plan_kind}-{plan_kind}"
-    sessions, warnings, calendar_ok = schedule_sessions(
+    sessions, warnings, calendar_ok, links = schedule_sessions(
         uid=uid,
         plan=plan,
         kind=plan_kind,
@@ -238,6 +239,7 @@ def scheduler_node(
         threshold=threshold,
     )
     ctx.state["calendar_synced"] = calendar_ok
+    ctx.state["calendar_links"] = links
     ctx.state["sessions"] = [s.model_dump(mode="json") for s in sessions]
     ctx.state["schedule_warnings"] = warnings
     return {"created_blocks": len(sessions), "calendar_synced": calendar_ok, "warnings": warnings}
@@ -254,7 +256,13 @@ def notifier_node(
     deadline: str = "",
 ):
     summary = notifier_mod.build_summary(
-        plan, sessions, schedule_warnings, weakness=weakness, kind=plan_kind, deadline=deadline
+        plan,
+        sessions,
+        schedule_warnings,
+        weakness=weakness,
+        kind=plan_kind,
+        deadline=deadline,
+        calendar_links=ctx.state.get("calendar_links") or {},
     )
     ctx.state["summary"] = summary
     return summary

@@ -43,3 +43,16 @@ RETURN s.id AS skill_id, collect(c.id) AS cert_ids;
 MATCH (u:User {uid: $uid})-[:SCHEDULED]->(ls:LearningSession)
 WHERE NOT ls.id IN $keep_ids
 DETACH DELETE ls;
+
+// -- name: set_cert_calendar --
+// 資格専用カレンダーの ID と公開用 URL を記録する (作り直しを防ぐ)
+MATCH (c:Certification {id: $cert_id})
+  SET c.calendar_id = $calendar_id, c.calendar_url = $calendar_url;
+
+// -- name: cert_calendar --
+MATCH (c:Certification {id: $cert_id})
+RETURN c.id                          AS cert_id,
+       c.name                        AS name,
+       coalesce(c.vendor, '')        AS vendor,
+       coalesce(c.calendar_id, '')   AS calendar_id,
+       coalesce(c.calendar_url, '')  AS calendar_url;

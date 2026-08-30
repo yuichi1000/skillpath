@@ -118,6 +118,7 @@ class RunResponse(BaseModel):
     plan: dict | None = None
     sessions: list[dict] = []
     schedule_warnings: list[str] = []
+    calendar_links: dict[str, str] = {}
     research_notes: str = ""
     specialist: str = ""
 
@@ -205,6 +206,7 @@ async def run(req: RunRequest) -> RunResponse:
         plan=s.get("plan"),
         sessions=s.get("sessions") or [],
         schedule_warnings=s.get("schedule_warnings") or [],
+        calendar_links=s.get("calendar_links") or {},
         research_notes=s.get("research_notes", ""),
         specialist=s.get("specialist", ""),
     )

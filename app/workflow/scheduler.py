@@ -225,7 +225,9 @@ def _parse_date(value: str) -> datetime | None:
         return None
 
 
-def other_pursuit_groups(uid: str, exclude_cert_id: str, threshold: float) -> list[PlanGroup]:
+def other_pursuit_groups(
+    uid: str, exclude_cert_id: str, threshold: float, pursuits: list[dict] | None = None
+) -> list[PlanGroup]:
     """今回の実行以外に、ユーザーが目指している資格の未消化分を計画し直す。
 
     再計画は決定的処理のみ (Cypher + トポロジカルソート) で LLM は呼ばない。
@@ -235,7 +237,9 @@ def other_pursuit_groups(uid: str, exclude_cert_id: str, threshold: float) -> li
     from app.workflow.planner import build_plan
 
     groups: list[PlanGroup] = []
-    for row in run_named("scheduler.cypher", "user_pursuits", uid=uid):
+    if pursuits is None:
+        pursuits = run_named("scheduler.cypher", "user_pursuits", uid=uid)
+    for row in pursuits:
         if row["cert_id"] == exclude_cert_id:
             continue
         rows = run_named(
@@ -264,6 +268,60 @@ def other_pursuit_groups(uid: str, exclude_cert_id: str, threshold: float) -> li
     return groups
 
 
+def ensure_cert_calendar(cert_id: str) -> tuple[str, str]:
+    """資格専用カレンダーを冪等に用意し、(calendar_id, 公開用URL) を返す。
+
+    初回登録時にその資格のカレンダーを自動生成する。すでに記録があり実在すれば
+    それを使い回す (ユーザーが手で消していた場合だけ作り直す)。
+    一般公開の設定はここでは行わない — 公開はカレンダーの持ち主の操作。
+    """
+    from app.tools import calendar_tool
+
+    rows = run_named("scheduler.cypher", "cert_calendar", cert_id=cert_id)
+    if not rows:
+        return "", ""
+    cert = rows[0]
+    if cert["calendar_id"] and calendar_tool.calendar_exists(cert["calendar_id"]):
+        return cert["calendar_id"], cert["calendar_url"]
+
+    vendor = f"{cert['vendor']} " if cert["vendor"] else ""
+    calendar_id = calendar_tool.create_calendar(
+        summary=f"SkillPath — {cert['name']}",
+        description=(
+            f"{vendor}{cert['name']} の学習ブロック。\n"
+            "SkillPath が前提スキルの依存関係と試験日から自動生成し、"
+            "模試の結果に応じて組み直します。"
+        ),
+        color_key=cert_id,
+    )
+    url = calendar_tool.public_url(calendar_id)
+    run_named(
+        "scheduler.cypher",
+        "set_cert_calendar",
+        cert_id=cert_id,
+        calendar_id=calendar_id,
+        calendar_url=url,
+    )
+    logger.info("資格カレンダーを新規作成: %s (%s)", cert["name"], calendar_id)
+    return calendar_id, url
+
+
+def _assign_certs_to_reviews(uid: str, sessions: list[SessionDraft]) -> None:
+    """資格が未確定のブロック (模試由来の復習) を、対象スキルが属する資格へ寄せる。"""
+    pending = [s for s in sessions if not s.cert_id]
+    if not pending:
+        return
+    rows = run_named(
+        "scheduler.cypher", "skill_certs", uid=uid,
+        skill_ids=sorted({s.skill_id for s in pending}),
+    )
+    by_skill = {r["skill_id"]: r["cert_ids"] for r in rows}
+    for sess in pending:
+        certs = by_skill.get(sess.skill_id) or []
+        if certs:
+            sess.cert_id = sorted(certs)[0]
+
+
 def schedule_sessions(
     uid: str,
     plan: PlannerOutput,
@@ -275,7 +333,7 @@ def schedule_sessions(
     cert_id: str = "",
     label: str = "",
     threshold: float = 0.7,
-) -> tuple[list[SessionDraft], list[str], bool]:
+) -> tuple[list[SessionDraft], list[str], bool, dict[str, str]]:
     """空き時間の取得 → 全資格の一括再配置 → カレンダー登録 → LearningSession 記録。
 
     今回の計画だけを空きに詰めるのではなく、ユーザーが目指している他の資格の
@@ -283,11 +341,13 @@ def schedule_sessions(
     期限の近い資格」が先に登録した資格の後ろに回ってしまう。
 
     CALENDAR_ENABLED のときは実カレンダーを使い、失敗時はプレースホルダに
-    フォールバック (ワークフローを止めない)。戻り値は (配置, 警告, カレンダー同期済みか)。
+    フォールバック (ワークフローを止めない)。
+    戻り値は (配置, 警告, カレンダー同期済みか, 資格ID→カレンダー公開URL)。
     """
     from app.tools import calendar_tool
     from app.workflow import notifier
 
+    calendar_links: dict[str, str] = {}
     groups = [
         PlanGroup(
             plan_key=plan_key,
@@ -298,16 +358,22 @@ def schedule_sessions(
             label=label,
         )
     ]
-    groups += other_pursuit_groups(uid, exclude_cert_id=cert_id, threshold=threshold)
+    pursuits = run_named("scheduler.cypher", "user_pursuits", uid=uid)
+    groups += other_pursuit_groups(uid, cert_id, threshold, pursuits=pursuits)
 
     window_end = start + timedelta(days=15)
+    # 空き時間の判定対象: 本人の予定 (primary) + 既存の資格カレンダー。
+    # 資格カレンダーを見ないと、他資格の学習ブロックが「無い」ことになってしまう。
+    calendar_ids = ("primary", *(p["calendar_id"] for p in pursuits if p["calendar_id"]))
     calendar_ok = False
     warnings_extra: list[str] = []
     if get_settings().calendar_enabled:
         try:
             # own_prefix: この uid の学習ブロックはすべて組み直す対象なので空きとして扱う。
             # 他の予定 (会議・私用) はそのまま busy。
-            busy = calendar_tool.get_busy(start, window_end, own_prefix=f"{uid}-")
+            busy = calendar_tool.get_busy(
+                start, window_end, calendar_ids=calendar_ids, own_prefix=f"{uid}-"
+            )
             slots = compute_free_slots(start, busy)
             calendar_ok = True
         except calendar_tool.CalendarUnavailable as e:
@@ -324,6 +390,16 @@ def schedule_sessions(
 
     if calendar_ok and sessions:
         # イベント作成 → LearningSession を Neo4j に記録 (設計書 §4.2 step 6 / §5 冪等)
+        _assign_certs_to_reviews(uid, sessions)
+        # 資格ごとのカレンダーを必要な分だけ用意する (初回登録時に自動生成)
+        cert_calendars: dict[str, str] = {}
+        for cid in sorted({s.cert_id for s in sessions if s.cert_id}):
+            cal_id, url = ensure_cert_calendar(cid)
+            if cal_id:
+                cert_calendars[cid] = cal_id
+                calendar_links.setdefault(cid, url)
+        calendar_ids = ("primary", *sorted(set(cert_calendars.values())))
+
         names = {i.skill_id: i.name or i.skill_id for g in groups for i in g.plan.plan}
         session_rows = []
         for sess in sessions:
@@ -331,7 +407,8 @@ def schedule_sessions(
                 sess.skill_id, names, sess.kind, weakness
             )
             event_id = calendar_tool.upsert_event(
-                sess.session_id, summary, description, sess.start, sess.end
+                sess.session_id, summary, description, sess.start, sess.end,
+                calendar_id=cert_calendars.get(sess.cert_id, "primary"),
             )
             session_rows.append(
                 {
@@ -351,7 +428,9 @@ def schedule_sessions(
         # 組み直しで不要になった過去のブロックを片付ける (空リストでは絶対に呼ばない)
         keep = {sess.session_id for sess in sessions}
         try:
-            removed = calendar_tool.delete_orphan_events(f"{uid}-", keep, start, window_end)
+            removed = calendar_tool.delete_orphan_events(
+                f"{uid}-", keep, start, window_end, calendar_ids=calendar_ids
+            )
             if removed:
                 logger.info("再配置で不要になった学習ブロックを %d 件削除", removed)
         except Exception:  # noqa: BLE001 - 掃除の失敗で計画自体を落とさない
@@ -360,4 +439,4 @@ def schedule_sessions(
             "scheduler.cypher", "delete_orphan_sessions", uid=uid, keep_ids=sorted(keep)
         )
 
-    return sessions, warnings + warnings_extra, calendar_ok
+    return sessions, warnings + warnings_extra, calendar_ok, calendar_links

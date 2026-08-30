@@ -45,7 +45,7 @@ def test_later_registered_cert_with_nearer_deadline_wins_the_early_slots(weaknes
     cert_a = next(g for g in groups if g.cert_id == "test-w-cert-a")
 
     # 資格A の計画を「今回の実行」として渡す (資格B は他の進行中資格として合流する)
-    sessions, warnings, _ = schedule_sessions(
+    sessions, warnings, _ok, _links = schedule_sessions(
         uid="test-w-user",
         plan=cert_a.plan,
         kind="initial",

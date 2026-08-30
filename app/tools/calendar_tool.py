@@ -9,14 +9,19 @@
 """
 
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 SESSION_ID_PROP = "skillpath_session_id"
@@ -62,6 +67,61 @@ def _tz() -> ZoneInfo:
 
 def _to_rfc3339(dt: datetime) -> str:
     return dt.replace(tzinfo=_tz()).isoformat()
+
+
+# 資格ごとのカレンダーに割り当てる色 (Google Calendar の colorId は 1-24)。
+# 資格 ID から決定的に選ぶので、再作成しても同じ資格は同じ色になる。
+CALENDAR_COLOR_COUNT = 24
+
+
+def public_url(calendar_id: str) -> str:
+    """カレンダーを一般公開したあとに共有できる閲覧 URL。"""
+    tz = get_settings().schedule_tz
+    return (
+        "https://calendar.google.com/calendar/embed"
+        f"?src={quote(calendar_id)}&ctz={quote(tz)}"
+    )
+
+
+def calendar_exists(calendar_id: str) -> bool:
+    """カレンダーがまだ存在するか (ユーザーが手で消した場合の作り直し判定)。"""
+    try:
+        get_service().calendars().get(calendarId=calendar_id).execute()
+        return True
+    except HttpError as e:
+        if e.resp.status in (403, 404):
+            return False
+        raise
+
+
+def create_calendar(summary: str, description: str = "", color_key: str = "") -> str:
+    """二次カレンダーを作成し、calendar_id を返す。
+
+    公開設定 (ACL) はここでは行わない。一般公開はカレンダーの持ち主が
+    Google カレンダーの設定画面から明示的に行う。
+    """
+    service = get_service()
+    created = (
+        service.calendars()
+        .insert(
+            body={
+                "summary": summary,
+                "description": description,
+                "timeZone": get_settings().schedule_tz,
+            }
+        )
+        .execute()
+    )
+    calendar_id = created["id"]
+    if color_key:
+        color_id = str(sum(map(ord, color_key)) % CALENDAR_COLOR_COUNT + 1)
+        try:
+            service.calendarList().patch(
+                calendarId=calendar_id, body={"colorId": color_id}
+            ).execute()
+        except HttpError:  # 色は付けられなくても致命ではない
+            logger.warning("カレンダーの色設定に失敗: %s", calendar_id)
+    return calendar_id
 
 
 def _own_session_id(ev: dict) -> str:
